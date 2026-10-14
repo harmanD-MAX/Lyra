@@ -602,11 +602,14 @@ def convert_voice(
     f0_method: str = "rmvpe",
     index_rate: float = 0.28,
     protect: float = 0.05,
+    style_strength: float = 0.85,
+    singing_style: Optional[str] = None,
     progress_cb=None
 ) -> str:
     """
     Converts lead vocal into either Arijit Singh or Sonu Nigam's authentic voice
-    using RVC v2 neural network, RMVPE pitch estimator, and FAISS feature retrieval index.
+    using RVC v2 neural network, RMVPE pitch estimator, FAISS feature retrieval index,
+    and Approach C (Hybrid Pitch Contour & Phrasing Stylizer) for signature Meend / Harkat.
     Auto-tuned for 100% Hindi lyric diction, high/low note tracking, and agile yodelling.
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -614,8 +617,11 @@ def convert_voice(
     singer_name = model_info["name"]
     converted_out = os.path.join(output_dir, "arijit_vocals.wav")
 
+    # Target singing style defaults to selected model
+    active_style = singing_style or model_name
+
     if progress_cb:
-        progress_cb(65, f"Initializing local {singer_name} RVC v2 inference engine...")
+        progress_cb(65, f"Initializing local {singer_name} RVC v2 inference engine (Approach C Phrasing)...")
 
     success = False
     model_dir = model_info["dir"]
@@ -637,14 +643,14 @@ def convert_voice(
         vc.get_vc(model_info["pth"])
 
         if progress_cb:
-            progress_cb(72, f"Executing {singer_name} voice conversion (RMVPE F0 tracker, index_rate={index_rate})...")
+            progress_cb(72, f"Executing {singer_name} voice conversion (RMVPE F0, index_rate={index_rate}, style={int(style_strength*100)}%)...")
 
         # Dynamic progress ticker to show active progress during long song inference
         import threading
         ticker_stop = threading.Event()
         def _ticker():
             steps = [
-                (74, f"Computing RMVPE pitch contour & vocal inflections ({singer_name})..."),
+                (74, f"Approach C: Applying {singer_name} Phrasing Stylizer (Meend, Harkat & Vibrato Bloom)..."),
                 (77, f"Aligning Hindi diction with {singer_name} FAISS feature index..."),
                 (80, f"Synthesizing high-fidelity neural vocal waveforms..."),
                 (83, f"Finalizing {singer_name} vocal timbre & acoustic harmonics...")
@@ -691,7 +697,9 @@ def convert_voice(
                 index_rate=safe_index_rate,
                 resample_sr=0,
                 rms_mix_rate=1.0,
-                protect=safe_protect
+                protect=safe_protect,
+                singing_style=active_style,
+                style_strength=float(style_strength),
             )
         finally:
             ticker_stop.set()

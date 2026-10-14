@@ -238,6 +238,8 @@ class VC:
         resample_sr,
         rms_mix_rate,
         protect,
+        singing_style=None,
+        style_strength=0.85,
     ):
         if input_audio_path is None:
             return inference_status("单次推理", "等待输入", i18n("请上传音频文件")), None
@@ -280,6 +282,8 @@ class VC:
                 rms_mix_rate,
                 self.version,
                 protect,
+                singing_style=singing_style,
+                style_strength=style_strength,
             )
             if self.tgt_sr != resample_sr >= 16000:
                 tgt_sr = resample_sr
