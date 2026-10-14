@@ -275,6 +275,8 @@ class Pipeline(object):
         rms_mix_rate,
         version,
         protect,
+        singing_style=None,
+        style_strength=0.85,
     ):
         if (
             file_index != ""
@@ -324,6 +326,16 @@ class Pipeline(object):
             )
             pitch = pitch[:p_len]
             pitchf = pitchf[:p_len]
+
+            # Approach C: Hybrid Pitch Contour & Phrasing Stylizer
+            if singing_style and style_strength > 0.01:
+                try:
+                    from infer.vc.stylizer import stylize_pitch_contour, coarse_f0_from_pitchf
+                    pitchf = stylize_pitch_contour(pitchf, singer=singing_style, strength=style_strength)
+                    pitch = coarse_f0_from_pitchf(pitchf)
+                except Exception as e_style:
+                    logger.warning(f"Approach C Stylizer exception (using raw pitch): {e_style}")
+
             pitchf = pitchf.astype(np.float32)
             pitch = torch.tensor(pitch, device=self.device).unsqueeze(0).long()
             pitchf = torch.tensor(pitchf, device=self.device).unsqueeze(0).float()

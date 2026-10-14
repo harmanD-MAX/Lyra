@@ -4,6 +4,7 @@ import LandingPage from './components/LandingPage';
 import InputSection from './components/InputSection';
 import ProcessingStatus from './components/ProcessingStatus';
 import StudioPlayer from './components/StudioPlayer';
+import StyleExpressionControls from './components/StyleExpressionControls';
 import {
   Wand2, Mic2, AlertCircle, History,
   Disc, CheckCircle2, Trash2, ArrowLeft
@@ -19,8 +20,12 @@ export default function App() {
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [spotifyUrl, setSpotifyUrl] = useState('');
 
-  // Model selection: 'arijit_singh' | 'sonu_nigam' | 'kk'
+  // Model selection: 'arijit_singh' | 'sonu_nigam'
   const [selectedModel, setSelectedModel] = useState('arijit_singh');
+
+  // Approach C: Phrasing Style Expression & Pitch
+  const [styleStrength, setStyleStrength] = useState(0.85);
+  const [pitchShift, setPitchShift] = useState(0);
 
   // Pipeline states
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -134,7 +139,8 @@ export default function App() {
     }
 
     formData.append('model_name', selectedModel);
-    formData.append('pitch_shift', 0);
+    formData.append('pitch_shift', pitchShift);
+    formData.append('style_strength', styleStrength);
     formData.append('f0_method', 'rmvpe');         // Continuous sub-cent neural pitch tracking
     formData.append('index_rate', 0.28);           // Optimal sweet spot: zero warping on yodels/high notes
     formData.append('protect', 0.50);              // Smooth transition protection for unvoiced / falsetto / yodels
@@ -308,8 +314,24 @@ export default function App() {
               </div>
             </div>
 
-            {/* 2. Audio Input Section */}
+            {/* 2. Authentic Phrasing & Style Expression (Approach C) */}
+            <StyleExpressionControls
+              selectedModel={selectedModel}
+              styleStrength={styleStrength}
+              setStyleStrength={setStyleStrength}
+              pitchShift={pitchShift}
+              setPitchShift={setPitchShift}
+              disabled={isSubmitting}
+            />
+
+            {/* 3. Audio Input Section */}
             <div className="space-y-2">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-bold tracking-wider uppercase text-[#888] flex items-center gap-1.5">
+                  <Mic2 className="w-4 h-4 text-[#10a37f]" />
+                  <span>3. Provide Audio Input</span>
+                </label>
+              </div>
               <InputSection
                 mode={mode}
                 setMode={setMode}

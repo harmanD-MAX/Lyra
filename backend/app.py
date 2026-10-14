@@ -181,6 +181,7 @@ def run_pipeline(
     has_music: bool = True,
     apply_autotune: bool = True,
     autotune_strength: float = 0.50,
+    style_strength: float = 0.85,
     spotify_url: Optional[str] = None
 ):
     job_dir = os.path.join(OUTPUTS_DIR, job_id)
@@ -248,7 +249,7 @@ def run_pipeline(
             instrumental_path = None
 
         # 3. Voice Conversion to Selected Singer (Arijit Singh or Sonu Nigam)
-        progress_callback(62, f"Converting vocal stem into {singer_name}'s voice (F0={f0_method}, pitch={pitch_shift:+d})...")
+        progress_callback(62, f"Converting vocal stem into {singer_name}'s voice (F0={f0_method}, pitch={pitch_shift:+d}, style={int(style_strength*100)}%)...")
         converted_vocal_path = audio_processor.convert_voice(
             vocal_path=isolated_vocal_path,
             output_dir=job_dir,
@@ -257,6 +258,7 @@ def run_pipeline(
             f0_method=f0_method,
             index_rate=index_rate,
             protect=protect,
+            style_strength=style_strength,
             progress_cb=progress_callback
         )
 
@@ -299,6 +301,7 @@ def run_pipeline(
                 "f0_method": f0_method,
                 "index_rate": index_rate,
                 "protect": protect,
+                "style_strength": style_strength,
                 "vocal_gain_db": vocal_gain_db,
                 "inst_gain_db": inst_gain_db,
                 "reverb_amount": reverb_amount,
@@ -359,7 +362,8 @@ async def start_conversion(
     clarity: float = Form(0.85),
     has_music: bool = Form(True),
     apply_autotune: bool = Form(True),
-    autotune_strength: float = Form(0.50)
+    autotune_strength: float = Form(0.50),
+    style_strength: float = Form(0.85)
 ):
     # Auto-detect spotify URL passed in youtube_url field
     if youtube_url and ("spotify.com" in youtube_url or youtube_url.startswith("spotify:")):
@@ -409,6 +413,7 @@ async def start_conversion(
         has_music=has_music,
         apply_autotune=apply_autotune,
         autotune_strength=autotune_strength,
+        style_strength=style_strength,
         spotify_url=spotify_url
     )
 
