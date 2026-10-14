@@ -1,0 +1,40 @@
+# Environments & Dependencies
+node_modules/
+frontend/node_modules/
+venv/
+env/
+.env
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Large Weights, Checkpoints & Assets (Exceeds GitHub 100MB limit)
+*.pth
+*.index
+*.pt
+*.bin
+*.onnx
+backend/assets/
+backend/models/
+
+# Generated Audio Outputs & Uploads
+backend/outputs/
+backend/uploads/
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.ogg
+*.part
+
+# Frontend Builds
+dist/
+frontend/dist/
+.vite/
+
+# Operating System files
+.DS_Store
+Thumbs.db
