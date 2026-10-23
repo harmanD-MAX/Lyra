@@ -25,6 +25,8 @@ MODELS_ROOT = os.path.join(BASE_DIR, "models")
 AVAILABLE_MODELS = {
     "arijit_singh": {
         "id": "arijit_singh",
+        "singing_style": "arijit_singh",
+        "default_index_rate": 0.28,
         "name": "Arijit Singh",
         "tagline": "Soulful & Emotional • Deep Chest Warmth",
         "dir": os.path.join(MODELS_ROOT, "arijit_singh"),
@@ -35,6 +37,8 @@ AVAILABLE_MODELS = {
     },
     "sonu_nigam": {
         "id": "sonu_nigam",
+        "singing_style": "sonu_nigam",
+        "default_index_rate": 0.28,
         "name": "Sonu Nigam",
         "tagline": "Golden Era Legend • Crystal Clear High Pitch & Classical Sur",
         "dir": os.path.join(MODELS_ROOT, "sonu_nigam"),
@@ -45,6 +49,8 @@ AVAILABLE_MODELS = {
     },
     "kk": {
         "id": "kk",
+        "singing_style": "kk",
+        "default_index_rate": 0.28,
         "name": "KK",
         "tagline": "Passionate Rock & Soul • High Belt Power & Emotional Depth",
         "dir": os.path.join(MODELS_ROOT, "kk"),
@@ -97,7 +103,7 @@ def get_demucs_model():
             import demucs.pretrained
             logger.info("Loading Demucs htdemucs model...")
             DEMUCS_MODEL = demucs.pretrained.get_model("htdemucs")
-            device = "mps" if torch.backends.mps.is_available() else "cpu"
+            device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
             DEMUCS_MODEL.to(device)
             DEMUCS_MODEL.eval()
             logger.info(f"Demucs loaded on {device}")
@@ -403,7 +409,7 @@ def separate_stems_demucs(audio_path: str, output_dir: str, progress_cb=None) ->
         progress_cb(30, "Analyzing track acoustics & loading Demucs stem separator...")
 
     model = get_demucs_model()
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
 
     # Read audio with soundfile (avoids torchcodec dependency)
     audio_data, sr = sf.read(audio_path)
@@ -475,8 +481,8 @@ def separate_stems_demucs(audio_path: str, output_dir: str, progress_cb=None) ->
     if i_peak > 0.95:
         inst_np = inst_np / i_peak * 0.92
 
-    sf.write(vocals_out, vocal_np, sr, subtype="PCM_16")
-    sf.write(inst_out, inst_np, sr, subtype="PCM_16")
+    sf.write(vocals_out, vocal_np, sr, subtype="PCM_24")
+    sf.write(inst_out, inst_np, sr, subtype="PCM_24")
 
     # Immediate cleanup of all Demucs tensors and unload the Demucs model from RAM/MPS!
     del sources, vocal_tensor, inst_tensor, vocal_np, inst_np
@@ -611,171 +617,149 @@ def apply_ai_autotune(
         return output_wav
 
 
+_VC_CACHE: Dict[str, Any] = {}
+
+
+def get_cached_vc(pth_path: str):
+    """Load an RVC model once and keep it (plus HuBERT) warm across jobs."""
+    from configs.config import Config
+    from infer.vc.modules import VC
+
+    key = os.path.abspath(pth_path)
+    vc = _VC_CACHE.get(key)
+    if vc is None:
+        # Keep a single model resident to bound memory; HuBERT is reused.
+        hubert = None
+        for old in list(_VC_CACHE.values()):
+            hubert = hubert or old.hubert_model
+        _VC_CACHE.clear()
+        clear_memory()
+        vc = VC(Config())
+        vc.hubert_model = hubert
+        os.environ["weight_root"] = os.path.dirname(key)
+        vc.get_vc(key)
+        _VC_CACHE[key] = vc
+    return vc
+
+
+def unload_vc_cache():
+    _VC_CACHE.clear()
+    clear_memory()
+
+
+def resolve_model_info(model_name: str) -> dict:
+    import voices
+    return voices.resolve_model(model_name, AVAILABLE_MODELS)
+
+
 def convert_voice(
     vocal_path: str,
     output_dir: str,
     model_name: str = "arijit_singh",
     pitch_shift: int = 0,
     f0_method: str = "rmvpe",
-    index_rate: float = 0.28,
-    protect: float = 0.05,
+    index_rate: Optional[float] = None,
+    protect: float = 0.33,
     style_strength: float = 1.0,
     singing_style: Optional[str] = None,
+    pitch_options: Optional[dict] = None,
+    output_name: str = "converted_vocals.wav",
     progress_cb=None
-) -> str:
+) -> dict:
     """
-    Converts lead vocal into either Arijit Singh or Sonu Nigam's authentic voice
-    using RVC v2 neural network, RMVPE pitch estimator, FAISS feature retrieval index,
-    and Approach C (Hybrid Pitch Contour & Phrasing Stylizer) for signature Meend / Harkat.
-    Auto-tuned for 100% Hindi lyric diction, high/low note tracking, and agile yodelling.
+    Render a vocal through an RVC v2 model (a built-in singer or a personal
+    "My Voice" model). The melody engine corrects the F0 curve inside the
+    pipeline (pitch_options) and, for singer models, Approach C adds the
+    singer's phrasing. The voice is synthesized exactly once.
+
+    Returns {"path", "f0", "fps", "sr", "engine"}; f0 is the final pitch curve
+    (100 fps) used for MIDI export.
     """
     os.makedirs(output_dir, exist_ok=True)
-    model_info = AVAILABLE_MODELS.get(model_name, AVAILABLE_MODELS["arijit_singh"])
+    model_info = resolve_model_info(model_name)
     singer_name = model_info["name"]
-    converted_out = os.path.join(output_dir, "arijit_vocals.wav")
-
-    # Target singing style defaults to selected model
-    active_style = singing_style or model_name
+    converted_out = os.path.join(output_dir, output_name)
+    is_personal = model_info.get("kind") == "personal"
+    active_style = None if is_personal else (singing_style or model_info.get("singing_style", model_info["id"]))
+    if index_rate is None:
+        index_rate = model_info.get("default_index_rate", 0.28)
+    index_rate = float(np.clip(index_rate, 0.0, 1.0))
+    protect = float(np.clip(protect if protect is not None else 0.33, 0.0, 0.5))
+    f0_method = f0_method if f0_method in ("rmvpe", "fcpe", "pm") else "rmvpe"
 
     if progress_cb:
-        progress_cb(65, f"Initializing local {singer_name} RVC v2 inference engine (Approach C Phrasing)...")
+        progress_cb(65, f"Loading {singer_name} neural voice model...")
 
+    result = {"path": converted_out, "f0": None, "fps": 100.0, "sr": 0, "engine": "rvc"}
+    pth_path = os.path.join(model_info["dir"], model_info["pth"])
+    idx_path = os.path.join(model_info["dir"], model_info["index"])
     success = False
-    model_dir = model_info["dir"]
-    pth_path = os.path.join(model_dir, model_info["pth"])
-    idx_path = os.path.join(model_dir, model_info["index"])
 
-    os.environ["weight_root"] = os.path.abspath(model_dir)
-
-    # Primary method: Local High-Precision RVC v2 Engine
     try:
-        from configs.config import Config
-        from infer.vc.modules import VC
-
+        vc = get_cached_vc(pth_path)
         if progress_cb:
-            progress_cb(68, f"Loading {singer_name} neural weights & RMVPE pitch estimator...")
+            progress_cb(70, f"Rendering {singer_name}'s voice (pitch engine: {(pitch_options or {}).get('mode', 'off')}, index={index_rate:.2f}, protect={protect:.2f})...")
 
-        config = Config()
-        vc = VC(config)
-        vc.get_vc(pth_path if os.path.exists(pth_path) else model_info["pth"])
-
-        if progress_cb:
-            progress_cb(72, f"Executing {singer_name} voice conversion (RMVPE F0, index_rate={index_rate}, style={int(style_strength*100)}%)...")
-
-        # Dynamic progress ticker to show active progress during long song inference
         import threading
         ticker_stop = threading.Event()
+
         def _ticker():
-            steps = [
-                (74, f"Approach C: Applying {singer_name} Phrasing Stylizer (Meend, Harkat & Vibrato Bloom)..."),
-                (77, f"Aligning Hindi diction with {singer_name} FAISS feature index..."),
-                (80, f"Synthesizing high-fidelity neural vocal waveforms..."),
-                (83, f"Finalizing {singer_name} vocal timbre & acoustic harmonics...")
+            cur = 70
+            msgs = [
+                f"Synthesizing {singer_name} vocal waveform...",
+                "Rendering corrected melody through the neural vocoder...",
+                "Protecting consonants and breaths...",
             ]
-            for pct, msg in steps:
-                if ticker_stop.wait(7.0):
-                    return
-                if progress_cb:
-                    progress_cb(pct, msg)
-
-            # For long tracks (3-5 minutes), continue pulsing active progress
-            cycles = [
-                f"Neural voice modeling ({singer_name}): refining Hindi articulation...",
-                f"Synthesizing melodic phonemes & micro-pitch contours...",
-                f"Balancing neural vocal dynamics & resonant acoustics...",
-                f"Deep learning inference in progress: processing audio blocks..."
-            ]
-            cycle_idx = 0
-            cur_pct = 83
+            i = 0
             while not ticker_stop.wait(6.0):
-                if cur_pct < 88:
-                    cur_pct += 1
-                msg = cycles[cycle_idx % len(cycles)]
-                cycle_idx += 1
+                cur = min(cur + 1, 84)
                 if progress_cb:
-                    progress_cb(cur_pct, msg)
+                    progress_cb(cur, msgs[i % len(msgs)])
+                i += 1
 
-        ticker_thread = threading.Thread(target=_ticker, daemon=True)
-        ticker_thread.start()
-
+        threading.Thread(target=_ticker, daemon=True).start()
         try:
-            # Optimal studio parameters:
-            # - index_rate: 0.28 (avoids FAISS clustering artifacts on rapid yodelling & high notes)
-            # - protect: 0.50 (guarantees continuous feature streaming with zero vocal cracking/voice breaks)
-            # - rms_mix_rate: 1.0 (preserves instantaneous syllable attack and decay dynamic punch)
-            safe_protect = 0.50 if (protect is None or float(protect) < 0.33) else float(protect)
-            safe_index_rate = 0.28 if (index_rate is None or float(index_rate) > 0.60) else float(index_rate)
-            resolved_index = os.path.abspath(idx_path) if (idx_path and os.path.exists(idx_path)) else ""
+            resolved_index = os.path.abspath(idx_path) if os.path.exists(idx_path) else ""
             status, audio_opt = vc.vc_single(
                 sid=0,
                 input_audio_path=os.path.abspath(vocal_path),
                 f0_up_key=int(pitch_shift),
-                f0_method="rmvpe",
+                f0_method=f0_method,
                 file_index=resolved_index,
-                index_rate=safe_index_rate,
+                index_rate=index_rate,
                 resample_sr=0,
                 rms_mix_rate=1.0,
-                protect=safe_protect,
+                protect=protect,
                 singing_style=active_style,
                 style_strength=float(style_strength),
+                pitch_options=pitch_options,
             )
         finally:
             ticker_stop.set()
 
-        if audio_opt is not None and isinstance(audio_opt, (tuple, list)) and len(audio_opt) == 2 and audio_opt[1] is not None:
+        if isinstance(audio_opt, (tuple, list)) and len(audio_opt) == 2 and audio_opt[1] is not None:
             tgt_sr, wav_data = audio_opt
-            sf.write(converted_out, wav_data, tgt_sr)
-            logger.info(f"Local {singer_name} RVC synthesis succeeded: {converted_out} (sr={tgt_sr})")
+            sf.write(converted_out, wav_data, tgt_sr, subtype="PCM_24")
+            result["sr"] = tgt_sr
+            result["f0"] = getattr(vc.pipeline, "last_f0", None)
             success = True
-            del audio_opt, wav_data
+            logger.info(f"{singer_name} RVC synthesis succeeded: {converted_out} (sr={tgt_sr})")
         else:
             logger.warning(f"RVC vc_single returned failure: status={status}")
-        del vc, config
-        clear_memory()
     except Exception as e:
         logger.error(f"Local RVC error: {e}", exc_info=True)
-        clear_memory()
+        unload_vc_cache()
 
-    # Fallback method: Remote HF space if local threw an unexpected exception
-    if not success and model_name == "arijit_singh":
-        try:
-            if progress_cb:
-                progress_cb(78, f"Connecting to fallback {singer_name} cluster...")
-            timeout_config = httpx.Timeout(180.0, connect=30.0, write=60.0, read=180.0)
-            client = Client("r3gm/rvc_zero", httpx_kwargs={"timeout": timeout_config})
-            kwargs = {
-                "audio_files": [handle_file(vocal_path)],
-                "file_m": handle_file(pth_path),
-                "pitch_alg": "rmvpe",
-                "pitch_lvl": float(pitch_shift),
-                "file_index": None,
-                "index_inf": float(index_rate),
-                "r_m_f": 3.0,
-                "e_r": float(protect),
-                "c_b_p": 0.5,
-                "active_noise_reduce": True,
-                "audio_effects": False,
-                "type_output": "wav",
-                "steps": 1,
-                "api_name": "/run"
-            }
-            result = client.predict(**kwargs)
-            if result and isinstance(result, list) and len(result) > 0 and os.path.exists(result[0]):
-                shutil.copy(result[0], converted_out)
-                success = True
-        except Exception as e2:
-            logger.warning(f"Fallback space failed: {e2}")
-
-    # Fallback 2: Formant modeling if both failed
+    # Fallback: formant modeling keeps the pipeline usable without weights
     if not success:
         if progress_cb:
-            progress_cb(80, f"Applying acoustic formant calibration ({singer_name} timbre)...")
-        _apply_formant_modeling(vocal_path, converted_out, singer=model_info["formant_type"], pitch_shift=pitch_shift)
+            progress_cb(80, f"Model unavailable; applying acoustic formant calibration ({singer_name})...")
+        _apply_formant_modeling(vocal_path, converted_out, singer=model_info.get("formant_type") or "arijit", pitch_shift=pitch_shift)
+        result["engine"] = "formant_fallback"
 
     if progress_cb:
-        progress_cb(85, f"{singer_name} vocal synthesis complete with Hindi diction & sur lock!")
-
-    return converted_out
+        progress_cb(85, f"{singer_name} vocal rendered.")
+    return result
 
 
 def convert_voice_with_arijit_model(
@@ -783,7 +767,7 @@ def convert_voice_with_arijit_model(
     output_dir: str,
     pitch_shift: int = 0,
     f0_method: str = "rmvpe",
-    index_rate: float = 0.85,
+    index_rate: float = 0.28,
     protect: float = 0.33,
     progress_cb=None
 ) -> str:
@@ -796,8 +780,9 @@ def convert_voice_with_arijit_model(
         f0_method=f0_method,
         index_rate=index_rate,
         protect=protect,
+        output_name="arijit_vocals.wav",
         progress_cb=progress_cb
-    )
+    )["path"]
 
 
 def _apply_formant_modeling(input_wav: str, output_wav: str, singer: str = "arijit", pitch_shift: int = 0):
@@ -1042,18 +1027,19 @@ def export_clean_unremastered_master(
         return clean_wav, clean_mp3
 
     if not vocal_path or not os.path.exists(vocal_path):
-        for candidate in ["vocal_autotuned.wav", "arijit_vocals.wav", "vocal_processed.wav", "vocals.wav"]:
+        for candidate in ["vocals_with_harmony.wav", "converted_vocals.wav", "arijit_vocals.wav", "vocal_processed.wav", "vocals.wav"]:
             p = os.path.join(output_dir, candidate)
             if os.path.exists(p) and os.path.getsize(p) > 100:
                 vocal_path = p
                 break
 
     if not inst_path or not os.path.exists(inst_path):
-        p = os.path.join(output_dir, "instrumental.wav")
-        if os.path.exists(p) and os.path.getsize(p) > 100:
-            inst_path = p
-        else:
-            inst_path = None
+        inst_path = None
+        for candidate in ["accompaniment.wav", "guide/accompaniment.wav", "instrumental.wav"]:
+            p = os.path.join(output_dir, candidate)
+            if os.path.exists(p) and os.path.getsize(p) > 100:
+                inst_path = p
+                break
 
     if not vocal_path or not os.path.exists(vocal_path):
         return clean_wav, clean_mp3
@@ -1149,19 +1135,9 @@ def master_and_remaster_track(
     master_clean_wav = os.path.join(output_dir, "master_clean.wav")
     master_clean_mp3 = os.path.join(output_dir, "master_clean.mp3")
 
-    # 0. Apply AI Auto-Tuner (adaptive speed to preserve artistic glides & vibrato)
-    if apply_autotune and autotune_strength > 0.15:
-        autotuned_wav = os.path.join(output_dir, "vocal_autotuned.wav")
-        # Use gentle retune speed (45ms) and capped strength so meend and murki are not flattened
-        safe_tune_strength = min(float(autotune_strength), 0.38)
-        apply_ai_autotune(
-            input_wav=vocal_wav,
-            output_wav=autotuned_wav,
-            autotune_strength=safe_tune_strength,
-            retune_speed_ms=max(retune_speed_ms, 45.0),
-            progress_cb=progress_cb
-        )
-        vocal_wav = autotuned_wav
+    # Pitch correction now happens on the F0 curve before synthesis (melody.py),
+    # so mastering never re-pitches the vocal with PSOLA. `apply_autotune` and
+    # `autotune_strength` are kept for API compatibility only.
 
     if progress_cb:
         progress_cb(89, "Engineering 3D Dolby soundstage: vocal focus, chest warmth & word spatialization...")
@@ -1227,7 +1203,7 @@ def master_and_remaster_track(
 
     # Export studio-polished solo vocal stem
     vocal_processed_path = os.path.join(output_dir, "vocal_processed.wav")
-    sf.write(vocal_processed_path, vocal, target_sr, subtype="PCM_16")
+    sf.write(vocal_processed_path, vocal, target_sr, subtype="PCM_24")
 
     # Process instrumental (reduce music level and apply dynamic Mid/Side pocket)
     if inst is not None:

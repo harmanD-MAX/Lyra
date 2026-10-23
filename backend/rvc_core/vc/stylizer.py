@@ -147,12 +147,17 @@ def stylize_pitch_contour(
 
             # 2. Harkat / Murki Ornamentation on Note Transitions:
             # When jumping between notes (>1.0 semitones), inject agile classical grace flutter
+            # A note change is a >1 semitone move within 50ms; one ornament per
+            # transition (peaks at least 120ms apart), not one per frame.
+            from scipy.signal import find_peaks
             murki = np.zeros(seg_len, dtype=np.float32)
-            diff_midi = np.diff(macro_contour)
-            jump_points = np.where(np.abs(diff_midi) > 0.12)[0]
+            span = min(5, max(1, seg_len - 1))
+            step_change = np.zeros(seg_len, dtype=np.float32)
+            step_change[:-span] = macro_contour[span:] - macro_contour[:-span]
+            jump_points, _ = find_peaks(np.abs(step_change), height=1.0, distance=12)
             for jp in jump_points:
                 if 3 < jp < seg_len - 7:
-                    direction = np.sign(diff_midi[jp])
+                    direction = np.sign(step_change[jp])
                     murki_dur = min(6, seg_len - jp - 1)
                     if direction > 0:
                         murki[jp:jp + murki_dur] += 0.85 * np.sin(np.linspace(0, np.pi, murki_dur))

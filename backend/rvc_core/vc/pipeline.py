@@ -122,10 +122,20 @@ class Pipeline(object):
                 threshold=0.006,
             ).squeeze().detach().cpu().numpy()
 
+        # Bridge only short pitch-tracker dropouts (<= 40ms) inside sung notes.
+        # Real unvoiced frames (consonants, breaths) must stay at 0 so the NSF
+        # generator uses noise excitation and `protect` can shield them;
+        # interpolating across them makes "s"/"sh" buzz and breaths metallic.
         try:
             uv = f0 == 0
             if np.any(~uv) and np.any(uv):
-                f0[uv] = np.interp(np.where(uv)[0], np.where(~uv)[0], f0[~uv])
+                max_gap = 4
+                idx = np.arange(len(f0))
+                filled = np.interp(idx, idx[~uv], f0[~uv])
+                diffs = np.diff(np.r_[0, uv.astype(np.int8), 0])
+                for s, e in zip(np.where(diffs == 1)[0], np.where(diffs == -1)[0]):
+                    if 0 < s and e < len(f0) and e - s <= max_gap:
+                        f0[s:e] = filled[s:e]
         except Exception:
             traceback.print_exc()
         f0 *= pow(2, f0_up_key / 12)
@@ -138,6 +148,48 @@ class Pipeline(object):
         f0_mel[f0_mel > 255] = 255
         f0_coarse = np.rint(f0_mel).astype(np.int32)
         return f0_coarse, f0bak  # 1-0
+
+    def apply_pitch_options(self, pitchf, p_len, f0_up_key, f0_method, options):
+        """
+        Correct the extracted F0 curve with the melody engine.
+
+        options:
+            mode: "scale" (snap to key), "guide" (follow a reference vocal) or "off"
+            key: (tonic, mode) tuple, or None to auto-detect from the melody
+            strength, retune_ms, steadiness, vibrato: see melody.correct_pitch
+            guide_audio_path: reference vocal on the same timeline (mode "guide")
+            guide_dtw: also time-map frames with DTW (if timing was not aligned)
+        """
+        import melody
+
+        mode = options.get("mode", "scale")
+        if mode == "off":
+            return pitchf
+        fps = self.sr / self.window
+        key = options.get("key")
+        strength = float(options.get("strength", 0.7))
+        retune_ms = float(options.get("retune_ms", 40.0))
+
+        if mode == "guide" and options.get("guide_audio_path"):
+            from infer.audio import load_audio
+
+            guide = load_audio(options["guide_audio_path"], 16000)
+            guide = signal.filtfilt(bh, ah, guide)
+            guide_pad = np.pad(guide, (self.t_pad, self.t_pad), mode="reflect")
+            _, guide_f0 = self.get_f0(guide_pad, p_len, f0_up_key, f0_method)
+            guide_f0 = guide_f0[:p_len]
+            if len(guide_f0) < p_len:
+                guide_f0 = np.pad(guide_f0, (0, p_len - len(guide_f0)))
+            return melody.align_to_guide(
+                pitchf, guide_f0, fps=fps, strength=strength, key=key,
+                use_dtw=bool(options.get("guide_dtw", False)), retune_ms=retune_ms,
+            )
+
+        return melody.correct_pitch(
+            pitchf, fps=fps, key=key, strength=strength, retune_ms=retune_ms,
+            steadiness=float(options.get("steadiness", 0.5)),
+            vibrato=float(options.get("vibrato", 0.0)),
+        )
 
     def vc(
         self,
@@ -277,6 +329,7 @@ class Pipeline(object):
         protect,
         singing_style=None,
         style_strength=0.85,
+        pitch_options=None,
     ):
         if (
             file_index != ""
@@ -326,16 +379,38 @@ class Pipeline(object):
             )
             pitch = pitch[:p_len]
             pitchf = pitchf[:p_len]
+            from infer.vc.stylizer import coarse_f0_from_pitchf
+
+            # Melody engine: all pitch correction happens here on the F0 curve,
+            # so the voice is synthesized exactly once (no PSOLA passes).
+            if pitch_options:
+                try:
+                    pitchf = self.apply_pitch_options(pitchf, p_len, f0_up_key, f0_method, pitch_options)
+                    pitch = coarse_f0_from_pitchf(pitchf)
+                except Exception as e_pitch:
+                    logger.warning(f"Pitch correction exception (using raw pitch): {e_pitch}", exc_info=True)
 
             # Approach C: Hybrid Pitch Contour & Phrasing Stylizer
             if singing_style and style_strength > 0.01:
                 try:
-                    from infer.vc.stylizer import stylize_pitch_contour, coarse_f0_from_pitchf
+                    from infer.vc.stylizer import stylize_pitch_contour
                     pitchf = stylize_pitch_contour(pitchf, singer=singing_style, strength=style_strength)
                     pitch = coarse_f0_from_pitchf(pitchf)
                 except Exception as e_style:
                     logger.warning(f"Approach C Stylizer exception (using raw pitch): {e_style}")
 
+            # Diatonic harmony voice (rendered as a separate pass by the caller)
+            if pitch_options and pitch_options.get("harmony_degrees"):
+                import melody
+                pitchf = melody.harmony_f0(
+                    pitchf, fps=self.sr / self.window,
+                    key=pitch_options.get("key"),
+                    degrees=int(pitch_options["harmony_degrees"]),
+                )
+                pitch = coarse_f0_from_pitchf(pitchf)
+
+            pad_frames = self.t_pad // self.window
+            self.last_f0 = np.asarray(pitchf[pad_frames: len(pitchf) - pad_frames], dtype=np.float32)
             pitchf = pitchf.astype(np.float32)
             pitch = torch.tensor(pitch, device=self.device).unsqueeze(0).long()
             pitchf = torch.tensor(pitchf, device=self.device).unsqueeze(0).float()
