@@ -10,7 +10,9 @@ export default function StyleExpressionControls({
   disabled
 }) {
   const isArijit = selectedModel === 'arijit_singh';
-  const singerName = isArijit ? 'Arijit Singh' : 'Sonu Nigam';
+  const isSonu = selectedModel === 'sonu_nigam';
+  const isKK = selectedModel === 'kk';
+  const singerName = isArijit ? 'Arijit Singh' : isSonu ? 'Sonu Nigam' : 'KK';
 
   const presets = [
     { label: 'Raw Pitch', value: 0.0, desc: 'Original phrasing verbatim' },
@@ -55,34 +57,53 @@ export default function StyleExpressionControls({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-[11px]">
-          {isArijit ? (
+          {isArijit && (
             <>
               <div className="p-2.5 rounded-lg bg-[#111] border border-[#242424] text-[#ccc]">
-                <span className="text-emerald-400 font-bold block mb-0.5">🌊 Meend (Glissando)</span>
+                <span className="text-emerald-400 font-bold block mb-0.5">🌊 Portamento Glides</span>
                 Soulful S-curve glides between notes instead of mechanical steps.
               </div>
               <div className="p-2.5 rounded-lg bg-[#111] border border-[#242424] text-[#ccc]">
                 <span className="text-emerald-400 font-bold block mb-0.5">🌸 Delayed Vibrato Bloom</span>
-                Initial 280ms held intimate & steady, followed by warm 5.15Hz bloom.
+                Initial 260ms held intimate & steady, followed by warm 5.15Hz bloom.
               </div>
               <div className="p-2.5 rounded-lg bg-[#111] border border-[#242424] text-[#ccc]">
                 <span className="text-emerald-400 font-bold block mb-0.5">🍂 Vulnerable Release</span>
-                Subtle emotional downward release dips at phrase endings.
+                Gentle romantic downward release dips (32 cents) at phrase endings.
               </div>
             </>
-          ) : (
+          )}
+
+          {isSonu && (
             <>
               <div className="p-2.5 rounded-lg bg-[#111] border border-[#242424] text-[#ccc]">
-                <span className="text-teal-400 font-bold block mb-0.5">⚡ Classical Murki & Harkat</span>
-                Agile micro-grace runs on interval jumps for authentic classical flair.
+                <span className="text-teal-400 font-bold block mb-0.5">⚡ Classical Grace Notes & Trills</span>
+                Audible classical ornament runs (+0.85 st) on melodic jumps.
               </div>
               <div className="p-2.5 rounded-lg bg-[#111] border border-[#242424] text-[#ccc]">
-                <span className="text-teal-400 font-bold block mb-0.5">🎯 Laser Sur-Lock</span>
+                <span className="text-teal-400 font-bold block mb-0.5">🎯 Laser Pitch Centering</span>
                 Pristine pitch centering that eliminates amateur vocal wobble and sag.
               </div>
               <div className="p-2.5 rounded-lg bg-[#111] border border-[#242424] text-[#ccc]">
                 <span className="text-teal-400 font-bold block mb-0.5">💎 Agile 5.95Hz Vibrato</span>
-                Fast, crisp classical vibrato with tight 18-cent controlled amplitude.
+                Fast, crisp classical vibrato with controlled 32-cent amplitude.
+              </div>
+            </>
+          )}
+
+          {isKK && (
+            <>
+              <div className="p-2.5 rounded-lg bg-[#111] border border-[#242424] text-[#ccc]">
+                <span className="text-amber-400 font-bold block mb-0.5">🎸 Straight-Tone Rock Belt</span>
+                Direct, powerful note attacks without pitch scooping or hesitation.
+              </div>
+              <div className="p-2.5 rounded-lg bg-[#111] border border-[#242424] text-[#ccc]">
+                <span className="text-amber-400 font-bold block mb-0.5">🔥 Dynamic Rock Vibrato</span>
+                Held straight for 350ms, then bursts with high-energy 5.75Hz vibrato.
+              </div>
+              <div className="p-2.5 rounded-lg bg-[#111] border border-[#242424] text-[#ccc]">
+                <span className="text-amber-400 font-bold block mb-0.5">⚡ Stadium Vocal Power</span>
+                Upper-mid harmonic projection (+18 cents push) for soaring choruses.
               </div>
             </>
           )}

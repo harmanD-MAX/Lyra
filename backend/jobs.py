@@ -83,8 +83,18 @@ class JobManager:
 
     def list_jobs(self, limit: int = 20, completed_only: bool = True) -> list:
         with self._lock:
-            jobs = [j for j in self._jobs.values() if (not completed_only or j.get("status") == "completed")]
-            sorted_jobs = sorted(jobs, key=lambda x: x.get("created_at", 0), reverse=True)
+            outputs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")
+            valid_jobs = []
+            for j in self._jobs.values():
+                if completed_only and j.get("status") != "completed":
+                    continue
+                jid = j.get("id")
+                if jid:
+                    j_dir = os.path.join(outputs_dir, jid)
+                    if not os.path.exists(j_dir):
+                        continue
+                valid_jobs.append(j)
+            sorted_jobs = sorted(valid_jobs, key=lambda x: x.get("created_at", 0), reverse=True)
             return sorted_jobs[:limit]
 
 job_manager = JobManager()

@@ -5,6 +5,11 @@ import shutil
 import threading
 import traceback
 from typing import Optional
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
 from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -12,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from jobs import job_manager
 import audio_processor
+import r2_storage
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
@@ -66,6 +72,10 @@ async def startup_scan_jobs():
                 continue
 
         master_wav = os.path.join(job_dir, "master_remastered.wav")
+        master_mp3 = os.path.join(job_dir, "master_remastered.mp3")
+        is_cloud_saved = bool((saved_meta.get("results", {}).get("saved_to_cloud") if saved_meta else None) or (existing.get("results", {}).get("saved_to_cloud") if existing else False))
+        has_master = os.path.exists(master_mp3) or os.path.exists(master_wav) or is_cloud_saved
+
         vocal_wav = None
         for candidate in ["arijit_vocals.wav", "vocal_processed.wav", "vocals.wav"]:
             p = os.path.join(job_dir, candidate)
@@ -73,7 +83,7 @@ async def startup_scan_jobs():
                 vocal_wav = p
                 break
 
-        if os.path.exists(master_wav) and vocal_wav:
+        if has_master:
             has_inst = os.path.exists(os.path.join(job_dir, "instrumental.wav"))
             has_orig_vocal = os.path.exists(os.path.join(job_dir, "vocals.wav"))
 
@@ -113,13 +123,16 @@ async def startup_scan_jobs():
                        (existing.get("results", {}).get("uploader") if existing else None) or \
                        "AI Studio"
 
+            cloud_master_url = (saved_meta.get("results", {}).get("cloud_master_3d_url") if saved_meta else None) or \
+                               (existing.get("results", {}).get("cloud_master_3d_url") if existing else None)
+
             job_manager._jobs[name] = {
                 "id": name,
                 "status": "completed",
                 "progress": 100,
                 "message": f"Completed with authentic {singer_name} diction & pitch lock",
-                "created_at": existing.get("created_at") if existing else os.path.getctime(master_wav),
-                "updated_at": existing.get("updated_at") if existing else os.path.getmtime(master_wav),
+                "created_at": existing.get("created_at") if existing else (os.path.getctime(master_mp3) if os.path.exists(master_mp3) else (os.path.getctime(master_wav) if os.path.exists(master_wav) else time.time())),
+                "updated_at": existing.get("updated_at") if existing else (os.path.getmtime(master_mp3) if os.path.exists(master_mp3) else (os.path.getmtime(master_wav) if os.path.exists(master_wav) else time.time())),
                 "metadata": {
                     "title": real_title,
                     "model_name": model_name,
@@ -133,6 +146,8 @@ async def startup_scan_jobs():
                     "uploader": uploader,
                     "singer": singer_name,
                     "model_name": model_name,
+                    "saved_to_cloud": is_cloud_saved,
+                    "cloud_master_3d_url": cloud_master_url,
                     "input_audio": f"/api/audio/{name}/input",
                     "vocals_original": f"/api/audio/{name}/vocal_original" if has_orig_vocal else "",
                     "instrumental": f"/api/audio/{name}/instrumental" if has_inst else "",
@@ -181,7 +196,7 @@ def run_pipeline(
     has_music: bool = True,
     apply_autotune: bool = True,
     autotune_strength: float = 0.50,
-    style_strength: float = 0.85,
+    style_strength: float = 1.0,
     spotify_url: Optional[str] = None
 ):
     job_dir = os.path.join(OUTPUTS_DIR, job_id)
@@ -227,8 +242,21 @@ def run_pipeline(
         else:
             progress_callback(10, "Validating and preparing uploaded audio file...")
             input_audio_path = os.path.join(job_dir, "input_audio.wav")
-            # Convert uploaded file to 44.1kHz standard WAV via ffmpeg
-            os.system(f"ffmpeg -y -i '{file_path}' -ar 44100 -ac 2 '{input_audio_path}' > /dev/null 2>&1")
+            # Convert uploaded file to 44.1kHz standard WAV via ffmpeg safely using subprocess
+            import subprocess
+            try:
+                subprocess.run([
+                    "ffmpeg", "-y", "-i", file_path,
+                    "-ar", "44100", "-ac", "2",
+                    input_audio_path
+                ], capture_output=True, check=True)
+            except Exception as ffmpeg_err:
+                logger.error(f"FFmpeg conversion failed: {ffmpeg_err}")
+                raise RuntimeError(f"Failed to decode uploaded audio file with FFmpeg: {ffmpeg_err}")
+
+            if not os.path.exists(input_audio_path) or os.path.getsize(input_audio_path) < 100:
+                raise RuntimeError("Converted audio file is empty or missing.")
+
             meta_info["title"] = os.path.basename(file_path) if file_path else "Uploaded Audio"
             # Delete redundant file in uploads folder to save precious disk space
             if file_path and os.path.exists(file_path):
@@ -247,6 +275,25 @@ def run_pipeline(
             progress_callback(35, "Input marked as pure vocal track (skipping stem separation)...")
             isolated_vocal_path = input_audio_path
             instrumental_path = None
+
+        # 2.5 Pre-Conversion Note Correction (Sur Lock):
+        # Correct and snap notes to 100% musical perfection BEFORE voice conversion,
+        # so RVC converts in-tune, pitch-perfect notes!
+        if source_type == "file":
+            progress_callback(50, "Perfecting notes: locking vocal pitch to musical scale before neural conversion...")
+            pitch_perfect_vocal = os.path.join(job_dir, "vocal_pitch_perfect.wav")
+            try:
+                audio_processor.apply_ai_autotune(
+                    input_wav=isolated_vocal_path,
+                    output_wav=pitch_perfect_vocal,
+                    autotune_strength=1.0,
+                    retune_speed_ms=10.0,
+                    progress_cb=progress_callback
+                )
+                if os.path.exists(pitch_perfect_vocal) and os.path.getsize(pitch_perfect_vocal) > 1000:
+                    isolated_vocal_path = pitch_perfect_vocal
+            except Exception as e:
+                logger.warning(f"Pre-conversion note correction error: {e}")
 
         # 3. Voice Conversion to Selected Singer (Arijit Singh or Sonu Nigam)
         progress_callback(62, f"Converting vocal stem into {singer_name}'s voice (F0={f0_method}, pitch={pitch_shift:+d}, style={int(style_strength*100)}%)...")
@@ -294,6 +341,8 @@ def run_pipeline(
             "vocals_converted": f"/api/audio/{job_id}/vocal_arijit",
             "master_remastered_wav": f"/api/audio/{job_id}/master_wav",
             "master_remastered_mp3": f"/api/audio/{job_id}/master_mp3",
+            "master_clean_wav": f"/api/audio/{job_id}/master_clean_wav",
+            "master_clean_mp3": f"/api/audio/{job_id}/master_clean_mp3",
             "settings": {
                 "model_name": model_name,
                 "singer_name": singer_name,
@@ -363,7 +412,7 @@ async def start_conversion(
     has_music: bool = Form(True),
     apply_autotune: bool = Form(True),
     autotune_strength: float = Form(0.50),
-    style_strength: float = Form(0.85)
+    style_strength: float = Form(1.0)
 ):
     # Auto-detect spotify URL passed in youtube_url field
     if youtube_url and ("spotify.com" in youtube_url or youtube_url.startswith("spotify:")):
@@ -388,7 +437,8 @@ async def start_conversion(
     })
 
     if audio_file:
-        dest_filename = f"{job_id}_{audio_file.filename}"
+        clean_base = os.path.basename(audio_file.filename).replace(" ", "_").replace("'", "").replace('"', "")
+        dest_filename = f"{job_id}_{clean_base}"
         saved_file_path = os.path.join(UPLOADS_DIR, dest_filename)
         with open(saved_file_path, "wb") as buffer:
             shutil.copyfileobj(audio_file.file, buffer)
@@ -429,6 +479,53 @@ async def get_spotify_track_info(url: str = Query(...)):
         raise HTTPException(status_code=400, detail=f"Failed to fetch Spotify track info: {str(e)}")
 
 
+@app.post("/api/tune_preview")
+async def tune_preview(audio_file: UploadFile = File(...)):
+    """
+    Instantly tunes a recorded vocal track to perfect musical semitones (Sur lock)
+    using Praat PSOLA at maximum precision, returning the pitch-corrected WAV.
+    """
+    tmp_id = f"preview_{int(time.time() * 1000)}"
+    tmp_dir = os.path.join(UPLOADS_DIR, tmp_id)
+    os.makedirs(tmp_dir, exist_ok=True)
+    raw_path = os.path.join(tmp_dir, "raw.wav")
+    standard_path = os.path.join(tmp_dir, "standard.wav")
+    tuned_path = os.path.join(tmp_dir, "tuned.wav")
+
+    try:
+        with open(raw_path, "wb") as buffer:
+            shutil.copyfileobj(audio_file.file, buffer)
+
+        import subprocess
+        subprocess.run([
+            "ffmpeg", "-y", "-i", raw_path,
+            "-ar", "44100", "-ac", "2",
+            standard_path
+        ], capture_output=True, check=True)
+
+        audio_processor.apply_ai_autotune(
+            input_wav=standard_path,
+            output_wav=tuned_path,
+            autotune_strength=1.0,
+            retune_speed_ms=10.0
+        )
+
+        with open(tuned_path, "rb") as f:
+            content = f.read()
+
+        return Response(
+            content=content,
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": "inline; filename=vocal_recording_tuned.wav"
+            }
+        )
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=f"Vocal note correction failed: {err}")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 @app.get("/api/status/{job_id}")
 async def get_job_status(job_id: str):
     job = job_manager.get_job(job_id)
@@ -437,9 +534,95 @@ async def get_job_status(job_id: str):
     return JSONResponse(content=job)
 
 
+@app.post("/api/jobs/clear_queue")
+async def clear_queue():
+    with job_manager._lock:
+        pending_ids = [jid for jid, j in job_manager._jobs.items() if j.get("status") in ["queued", "processing", "error"]]
+        for jid in pending_ids:
+            del job_manager._jobs[jid]
+        job_manager._save()
+    return JSONResponse(content={"status": "success", "cleared_count": len(pending_ids)})
+
+
 @app.get("/api/jobs")
 async def list_recent_jobs():
     return JSONResponse(content={"jobs": job_manager.list_jobs(20, completed_only=True)})
+
+
+@app.post("/api/jobs/{job_id}/save_to_cloud")
+async def save_job_to_cloud(job_id: str):
+    """
+    Saves ONLY 1 single audio file (Master 3D) to Cloudflare R2 upon explicit user confirmation.
+    Other stems/clean versions are not uploaded to save storage.
+    Frees up heavy local scratch WAV files.
+    """
+    job = job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job_dir = os.path.join(OUTPUTS_DIR, job_id)
+    if not os.path.exists(job_dir):
+        raise HTTPException(status_code=404, detail="Job directory not found")
+
+    # Locate the Master 3D audio file
+    master_file = None
+    for candidate in ["master_remastered.mp3", "master_remastered.opus", "master_remastered.wav"]:
+        cand_path = os.path.join(job_dir, candidate)
+        if os.path.exists(cand_path) and os.path.getsize(cand_path) > 1000:
+            master_file = cand_path
+            break
+
+    if not master_file:
+        raise HTTPException(status_code=404, detail="Master 3D audio file not found to save")
+
+    if not r2_storage.is_r2_configured():
+        raise HTTPException(status_code=500, detail="Cloudflare R2 cloud storage is not configured")
+
+    # Upload ONLY the 1 Master 3D version to R2
+    remote_key = f"{job_id}/master_3d.mp3"
+    content_type = "audio/mpeg" if master_file.endswith(".mp3") else ("audio/wav" if master_file.endswith(".wav") else "audio/ogg; codecs=opus")
+    cloud_url = r2_storage.upload_audio_to_r2(master_file, remote_key, content_type=content_type)
+    if not cloud_url:
+        raise HTTPException(status_code=500, detail="Failed to upload Master 3D to Cloudflare R2")
+
+    # Update job metadata in memory and disk
+    if "results" not in job:
+        job["results"] = {}
+    job["results"]["saved_to_cloud"] = True
+    job["results"]["cloud_master_3d_url"] = cloud_url
+    job_manager._save()
+
+    meta_path = os.path.join(job_dir, "meta.json")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r") as f:
+                data = json.load(f)
+            if "results" not in data:
+                data["results"] = {}
+            data["results"]["saved_to_cloud"] = True
+            data["results"]["cloud_master_3d_url"] = cloud_url
+            with open(meta_path, "w") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print("Error updating meta.json:", e)
+
+    # Clean up ALL heavy temporary local stems and uncompressed WAVs from outputs folder
+    # Cloudflare R2 stores the single Master 3D MP3, so local outputs only needs meta.json (1 KB)
+    for fname in os.listdir(job_dir):
+        if fname not in ["meta.json", "master_remastered.mp3"]:
+            try:
+                fpath = os.path.join(job_dir, fname)
+                if os.path.isfile(fpath):
+                    os.remove(fpath)
+            except Exception:
+                pass
+
+    return JSONResponse(content={
+        "status": "success",
+        "message": "Master 3D saved to Cloudflare R2 cloud storage successfully!",
+        "cloud_url": cloud_url,
+        "saved_to_cloud": True
+    })
 
 
 @app.delete("/api/jobs/{job_id}")
@@ -477,16 +660,16 @@ async def quick_remix(
 
     job_dir = os.path.join(OUTPUTS_DIR, job_id)
     
-    # Locate cleanest vocal stem:
-    # If vocal_autotuned.wav already exists, use it directly and bypass redundant PSOLA processing
+    # Locate vocal stem
     autotuned_candidate = os.path.join(job_dir, "vocal_autotuned.wav")
     need_autotune = apply_autotune
-    if os.path.exists(autotuned_candidate):
+    vocal_path = None
+
+    if apply_autotune and os.path.exists(autotuned_candidate):
         vocal_path = autotuned_candidate
         need_autotune = False  # already tuned, saves 15-20s CPU processing!
     else:
-        vocal_path = None
-        for candidate in ["arijit_vocals.wav", "vocal_processed.wav", "vocals.wav"]:
+        for candidate in ["arijit_vocals.wav", "vocal_processed.wav", "vocal_autotuned.wav", "vocals.wav"]:
             p = os.path.join(job_dir, candidate)
             if os.path.exists(p):
                 vocal_path = p
@@ -522,6 +705,8 @@ async def quick_remix(
         "message": "Remastered track updated successfully with new balance, autotune, echo, and reverb parameters!",
         "master_wav": f"/api/audio/{job_id}/master_wav?t={now_ts}",
         "master_mp3": f"/api/audio/{job_id}/master_mp3?t={now_ts}",
+        "master_clean_wav": f"/api/audio/{job_id}/master_clean_wav?t={now_ts}",
+        "master_clean_mp3": f"/api/audio/{job_id}/master_clean_mp3?t={now_ts}",
         "vocal_wav": f"/api/audio/{job_id}/vocal_arijit?t={now_ts}"
     })
 
@@ -603,6 +788,9 @@ async def get_audio_file(job_id: str, track_type: str, request: Request, downloa
         "vocal_autotuned": "vocal_autotuned.wav",
         "master_wav": "master_remastered.wav",
         "master_mp3": "master_remastered.mp3",
+        "master_clean_wav": "master_clean.wav",
+        "master_clean_mp3": "master_clean.mp3",
+        "master_clean": "master_clean.mp3",
     }
     
     filename = file_map.get(track_type)
@@ -611,14 +799,48 @@ async def get_audio_file(job_id: str, track_type: str, request: Request, downloa
         
     file_path = os.path.join(job_dir, filename)
     if not os.path.exists(file_path):
-        # Fallbacks for vocal variations
-        if track_type in ["vocal_arijit", "vocal_converted", "vocal_autotuned"]:
-            for alt in ["vocal_processed.wav", "vocal_autotuned.wav", "arijit_vocals.wav"]:
+        # Ensure clean unremastered master is synthesized on the fly if missing (0% remastering)
+        if track_type in ["master_clean", "master_clean_mp3", "master_clean_wav"]:
+            clean_wav, clean_mp3 = audio_processor.export_clean_unremastered_master(job_dir)
+            target_f = clean_mp3 if track_type != "master_clean_wav" else clean_wav
+            if os.path.exists(target_f) and os.path.getsize(target_f) > 100:
+                file_path = target_f
+            else:
+                for alt in ["master_clean.mp3", "master_clean.wav"]:
+                    alt_p = os.path.join(job_dir, alt)
+                    if os.path.exists(alt_p) and os.path.getsize(alt_p) > 100:
+                        file_path = alt_p
+                        break
+        # Fallbacks for master tracks
+        elif track_type in ["master_mp3", "master_wav"]:
+            for alt in ["master_remastered.mp3", "master_remastered.wav", "vocal_processed.wav", "arijit_vocals.wav", "vocal_pitch_perfect.wav", "vocals.wav"]:
                 alt_p = os.path.join(job_dir, alt)
-                if os.path.exists(alt_p):
+                if os.path.exists(alt_p) and os.path.getsize(alt_p) > 100:
                     file_path = alt_p
                     break
+        elif track_type in ["vocal_arijit", "vocal_converted", "vocal_autotuned"]:
+            for alt in ["vocal_processed.wav", "vocal_autotuned.wav", "arijit_vocals.wav", "vocal_pitch_perfect.wav", "vocals.wav"]:
+                alt_p = os.path.join(job_dir, alt)
+                if os.path.exists(alt_p) and os.path.getsize(alt_p) > 100:
+                    file_path = alt_p
+                    break
+        elif track_type in ["vocal_original", "input"]:
+            for alt in ["vocals.wav", "input_audio.wav"]:
+                alt_p = os.path.join(job_dir, alt)
+                if os.path.exists(alt_p) and os.path.getsize(alt_p) > 100:
+                    file_path = alt_p
+                    break
+
         if not os.path.exists(file_path):
+            if r2_storage.is_r2_configured():
+                candidate_keys = [f"{job_id}/{filename}"]
+                if track_type in ["master_mp3", "master_wav", "master"]:
+                    candidate_keys = [f"{job_id}/master_3d.mp3", f"{job_id}/master_remastered.mp3", f"{job_id}/{filename}"]
+                for ck in candidate_keys:
+                    r2_url = r2_storage.get_r2_presigned_url(ck)
+                    if r2_url:
+                        from fastapi.responses import RedirectResponse
+                        return RedirectResponse(url=r2_url, status_code=307)
             raise HTTPException(status_code=404, detail=f"Audio file '{filename}' not found for job {job_id}")
 
     media_type = "audio/mpeg" if file_path.endswith(".mp3") else "audio/wav"
