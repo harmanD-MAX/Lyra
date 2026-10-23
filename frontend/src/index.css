@@ -1,12 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  --color-chatgpt-bg: #0d0d0d;
-  --color-chatgpt-surface: #171717;
-  --color-chatgpt-surface-hover: #212121;
-  --color-chatgpt-border: #2f2f2f;
-  --color-chatgpt-accent: #10a37f;
-  --color-chatgpt-accent-glow: rgba(16, 163, 127, 0.25);
+  --color-chatgpt-bg: #0b0c0e;
+  --color-chatgpt-surface: #14161a;
+  --color-chatgpt-surface-hover: #1c1f24;
+  --color-chatgpt-border: #282c34;
+  --color-lyra-gold: #e5a958;
+  --color-lyra-gold-dark: #b87d32;
+  --color-chatgpt-accent: #e5a958;
+  --color-chatgpt-accent-glow: rgba(229, 169, 88, 0.25);
 }
 
 html {
@@ -14,10 +16,49 @@ html {
 }
 
 body {
-  background-color: #0d0d0d;
+  background-color: #0b0c0e;
   color: #ececec;
   overflow-x: hidden;
+  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif;
 }
+
+/* Space Grotesk Display & Branding Font */
+.font-serif,
+.font-display,
+.font-brand,
+[style*="'Space Grotesk'"],
+[style*="Space Grotesk"],
+[style*="'Syne'"],
+[style*="Syne"] {
+  font-family: 'Space Grotesk', -apple-system, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.hero-headline {
+  font-weight: 800 !important;
+  -webkit-text-stroke: 0.8px currentColor;
+  text-shadow: 0 4px 30px rgba(0, 0, 0, 0.85), 0 2px 8px rgba(0, 0, 0, 0.95);
+}
+
+.hero-subtext {
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.85), 0 1px 4px rgba(0, 0, 0, 0.95);
+}
+
+.glass-card {
+  background: rgba(14, 16, 20, 0.65);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.glass-card-hover:hover {
+  background: rgba(22, 25, 32, 0.8);
+  border-color: rgba(229, 169, 88, 0.35);
+  transform: translateY(-2px);
+}
+
+
 
 /* Custom scrollbar */
 ::-webkit-scrollbar {
@@ -85,4 +126,55 @@ body {
 .animate-signal {
   stroke-dasharray: 8, 8;
   animation: signal-flow 2s linear infinite;
+}
+
+/* =========================================================================
+   NATURAL SMOOTH SCROLLING & ELEGANT REVEAL TRANSITIONS
+   ========================================================================= */
+html {
+  scroll-behavior: smooth;
+}
+
+.story-section {
+  position: relative;
+  min-height: 100vh;
+}
+
+/* Smooth Scroll Reveal Animations */
+.scroll-reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.85s cubic-bezier(0.16, 1, 0.3, 1), transform 0.85s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+.scroll-reveal.is-revealed,
+.is-revealed .scroll-reveal {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.reveal-delay-1 { transition-delay: 0.08s; }
+.reveal-delay-2 { transition-delay: 0.16s; }
+.reveal-delay-3 { transition-delay: 0.24s; }
+.reveal-delay-4 { transition-delay: 0.32s; }
+.reveal-delay-5 { transition-delay: 0.40s; }
+
+@keyframes wave-bounce {
+  0%, 100% { transform: scaleY(0.25); }
+  50% { transform: scaleY(1); }
+}
+
+.animate-wave-bar {
+  animation: wave-bounce 1.4s ease-in-out infinite;
+  transform-origin: bottom;
+}
+
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.25; transform: scale(0.98); }
+  50% { opacity: 0.6; transform: scale(1.02); }
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 6s ease-in-out infinite;
 }

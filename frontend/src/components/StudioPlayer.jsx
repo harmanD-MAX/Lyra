@@ -35,7 +35,7 @@ export default function StudioPlayer({ jobResults, jobId }) {
   const [spatialDepth, setSpatialDepth] = useState(0.03); // 2. Ultra-Subtle 3D Stereo Spatializer (Haas & ambient reflections)
   const [hallGoonj, setHallGoonj] = useState(0.05); // 3. Grand Hall Orchestra Reverb (Velvet diffusion tail & 4.5kHz damping)
   const [presenceBoostDb, setPresenceBoostDb] = useState(2.8); // 4. Lead Vocal Presence Lift (+2.8dB at 2.8k-4.8kHz)
-  
+
   // Complementary Balance Sliders
   const [vocalGainDb, setVocalGainDb] = useState(2.8); // Lead vocal focus level
   const [instGainDb, setInstGainDb] = useState(-7.5); // Backing music pocket ducking
@@ -169,7 +169,7 @@ export default function StudioPlayer({ jobResults, jobId }) {
     {
       id: 'vocal_arijit',
       name: `${singerName} Vocal Stem`,
-      subtitle: 'Auto-Tuned & Polished Lead Acapella • Pure Sur & Timbre',
+      subtitle: 'Polished Lead Acapella • Pure Pitch & Timbre',
       src: `${res.vocals_arijit}${cacheBuster ? `?cb=${cacheBuster}` : ''}`,
       downloadWav: res.vocals_arijit,
       badge: 'SOLO VOCAL',
@@ -179,7 +179,7 @@ export default function StudioPlayer({ jobResults, jobId }) {
     {
       id: 'instrumental',
       name: 'Isolated Instrumental Backing',
-      subtitle: 'Demucs Extracted Music (Drums, Bass, Guitars, Synths)',
+      subtitle: 'Pure Studio Backing Music (Drums, Bass, Guitars, Synths)',
       src: res.instrumental,
       downloadWav: res.instrumental,
       badge: 'BACKING TRACK',
@@ -321,8 +321,8 @@ export default function StudioPlayer({ jobResults, jobId }) {
             type="button"
             onClick={toggleABComparison}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${comparisonMode === 'arijit'
-                ? 'bg-[#10a37f]/10 border-[#10a37f]/40 text-[#10a37f] shadow-md'
-                : 'bg-[#1f1f1f] border-[#333] text-[#ccc]'
+              ? 'bg-[#10a37f]/10 border-[#10a37f]/40 text-[#10a37f] shadow-md'
+              : 'bg-[#1f1f1f] border-[#333] text-[#ccc]'
               }`}
           >
             <ArrowLeftRight className="w-4 h-4 text-[#10a37f]" />
@@ -444,8 +444,8 @@ export default function StudioPlayer({ jobResults, jobId }) {
                 <div
                   key={i}
                   className={`flex-1 rounded-full transition-all duration-100 ${isPassed
-                      ? 'bg-[#10a37f] shadow-[0_0_8px_rgba(16,163,127,0.4)] opacity-100'
-                      : 'bg-[#262626] group-hover:bg-[#2e2e2e] opacity-45'
+                    ? 'bg-[#10a37f] shadow-[0_0_8px_rgba(16,163,127,0.4)] opacity-100'
+                    : 'bg-[#262626] group-hover:bg-[#2e2e2e] opacity-45'
                     }`}
                   style={{ height: `${heightPct}%` }}
                 ></div>
@@ -516,8 +516,8 @@ export default function StudioPlayer({ jobResults, jobId }) {
                 key={track.id}
                 onClick={() => selectTrack(track.id)}
                 className={`p-4 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-4 ${isSelected
-                    ? 'bg-[#1a1a1a] border-[#10a37f] shadow-lg shadow-[#10a37f]/10'
-                    : 'bg-[#121212] border-[#252525] hover:border-[#383838] hover:bg-[#151515]'
+                  ? 'bg-[#1a1a1a] border-[#10a37f] shadow-lg shadow-[#10a37f]/10'
+                  : 'bg-[#121212] border-[#252525] hover:border-[#383838] hover:bg-[#151515]'
                   }`}
               >
                 <div className="flex items-center gap-3 min-w-0">
@@ -582,7 +582,7 @@ export default function StudioPlayer({ jobResults, jobId }) {
                 </span>
               </div>
               <p className="text-xs text-[#888]">
-                Adjust the 4 acoustic pillars with interactive sliders and remaster immediately without re-running neural RVC.
+                Adjust the 4 acoustic pillars with interactive sliders and remaster immediately with zero latency.
               </p>
             </div>
 
@@ -655,7 +655,7 @@ export default function StudioPlayer({ jobResults, jobId }) {
                     className="w-full h-1.5 bg-[#252525] rounded-lg appearance-none cursor-pointer accent-emerald-500"
                   />
                   <p className="text-[11px] text-[#777] leading-relaxed">
-                    Preserves dead-center lead vocal presence for 100% Hindi diction & sur clarity. Keeps vocals stationary and pristine in the center of the soundstage.
+                    Preserves dead-center lead vocal presence for 100% diction & pitch clarity. Keeps vocals stationary and pristine in the center of the soundstage.
                   </p>
                 </div>
 

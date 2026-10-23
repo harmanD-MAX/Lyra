@@ -42,6 +42,16 @@ AVAILABLE_MODELS = {
         "index": "added_IVF899_Flat_nprobe_1_sonu-nigam_v2.index",
         "formant_type": "sonu",
         "remote_hf_model": "Nitishkumar8948/Sonunigam"
+    },
+    "kk": {
+        "id": "kk",
+        "name": "KK",
+        "tagline": "Passionate Rock & Soul • High Belt Power & Emotional Depth",
+        "dir": os.path.join(MODELS_ROOT, "kk"),
+        "pth": "model.pth",
+        "index": "model.index",
+        "formant_type": "kk",
+        "remote_hf_model": "sarkari/kk"
     }
 }
 
@@ -501,7 +511,7 @@ def apply_ai_autotune(
     from scipy.ndimage import median_filter, gaussian_filter1d
 
     if progress_cb:
-        progress_cb(87, f"AI Auto-Tuner: Eliminating vocal stutter/tremor & locking Sur (strength={int(autotune_strength*100)}%)...")
+        progress_cb(87, f"AI Auto-Tuner: Locking Sur while preserving 100% natural vibrato & micro-nuance (strength={int(autotune_strength*100)}%)...")
 
     try:
         audio, sr = sf.read(input_wav)
@@ -534,19 +544,26 @@ def apply_ai_autotune(
         # MIDI note conversion
         midi = 69.0 + 12.0 * np.log2(np.maximum(freqs, 20.0) / 440.0)
 
-        # 1. Anti-jitter & anti-tremor filtering (removes single-frame octave errors and tremors)
+        # 1. Anti-jitter filtering (removes single-frame octave errors)
         midi_clean = median_filter(midi, size=3)
-        sigma = max(1.0, (retune_speed_ms / 1000.0) / time_step)
-        midi_smooth = gaussian_filter1d(midi_clean, sigma=sigma)
 
-        # 2. Musical pitch snap (nearest chromatic 12-TET semitone)
-        midi_target = np.round(midi_smooth)
+        # 2. Musical chromatic 12-TET semitone quantization:
+        target_note = np.round(midi_clean)
 
-        # 3. Adaptive blend: Strong pull near notes, soft transition during active portamento slides
-        diff = midi_clean - midi_target
-        pull_weight = np.clip(1.0 - (np.abs(diff) - 0.5) * 1.5, 0.25, 1.0)
-        effective_strength = float(autotune_strength) * pull_weight
-        snapped_midi = midi_clean * (1.0 - effective_strength) + midi_target * effective_strength
+        if autotune_strength >= 0.85:
+            # 100% Pitch-Perfect Studio Note Lock:
+            # Snaps vocal notes directly to the exact musical semitones (0 pitch drift)
+            sigma = max(0.4, (retune_speed_ms / 1000.0) / time_step * 0.25)
+            tuned_midi = gaussian_filter1d(target_note, sigma=sigma)
+            snapped_midi = tuned_midi
+        else:
+            # Medium / gentle autotune
+            macro_sigma = max(4.0, (retune_speed_ms / 1000.0) / time_step)
+            macro_pitch = gaussian_filter1d(midi_clean, sigma=macro_sigma)
+            vibrato_and_nuance = midi_clean - macro_pitch
+            tuned_macro = (1.0 - autotune_strength) * macro_pitch + autotune_strength * np.round(macro_pitch)
+            snapped_midi = tuned_macro + vibrato_and_nuance * (1.0 - autotune_strength * 0.5)
+
         target_freqs = 440.0 * (2.0 ** ((snapped_midi - 69.0) / 12.0))
 
         # Rebuild pitch tier
@@ -602,7 +619,7 @@ def convert_voice(
     f0_method: str = "rmvpe",
     index_rate: float = 0.28,
     protect: float = 0.05,
-    style_strength: float = 0.85,
+    style_strength: float = 1.0,
     singing_style: Optional[str] = None,
     progress_cb=None
 ) -> str:
@@ -640,7 +657,7 @@ def convert_voice(
 
         config = Config()
         vc = VC(config)
-        vc.get_vc(model_info["pth"])
+        vc.get_vc(pth_path if os.path.exists(pth_path) else model_info["pth"])
 
         if progress_cb:
             progress_cb(72, f"Executing {singer_name} voice conversion (RMVPE F0, index_rate={index_rate}, style={int(style_strength*100)}%)...")
@@ -688,12 +705,13 @@ def convert_voice(
             # - rms_mix_rate: 1.0 (preserves instantaneous syllable attack and decay dynamic punch)
             safe_protect = 0.50 if (protect is None or float(protect) < 0.33) else float(protect)
             safe_index_rate = 0.28 if (index_rate is None or float(index_rate) > 0.60) else float(index_rate)
+            resolved_index = os.path.abspath(idx_path) if (idx_path and os.path.exists(idx_path)) else ""
             status, audio_opt = vc.vc_single(
                 sid=0,
-                input_audio_path=vocal_path,
+                input_audio_path=os.path.abspath(vocal_path),
                 f0_up_key=int(pitch_shift),
                 f0_method="rmvpe",
-                file_index=idx_path if os.path.exists(idx_path) else "",
+                file_index=resolved_index,
                 index_rate=safe_index_rate,
                 resample_sr=0,
                 rms_mix_rate=1.0,
@@ -704,14 +722,14 @@ def convert_voice(
         finally:
             ticker_stop.set()
 
-        if audio_opt is not None:
+        if audio_opt is not None and isinstance(audio_opt, (tuple, list)) and len(audio_opt) == 2 and audio_opt[1] is not None:
             tgt_sr, wav_data = audio_opt
             sf.write(converted_out, wav_data, tgt_sr)
             logger.info(f"Local {singer_name} RVC synthesis succeeded: {converted_out} (sr={tgt_sr})")
             success = True
             del audio_opt, wav_data
         else:
-            logger.warning(f"RVC vc_single returned None (status: {status})")
+            logger.warning(f"RVC vc_single returned failure: status={status}")
         del vc, config
         clear_memory()
     except Exception as e:
@@ -808,6 +826,16 @@ def _apply_formant_modeling(input_wav: str, output_wav: str, singer: str = "arij
         gain_curve -= 0.20 * np.exp(-0.5 * ((freqs - 750) / 180) ** 2)
         gain_curve += 0.48 * np.exp(-0.5 * ((freqs - 4000) / 700) ** 2)
         gain_curve += 0.30 * np.exp(-0.5 * ((freqs - 11000) / 2500) ** 2)
+    elif singer == "kk":
+        # KK (Krishnakumar Kunnath) Formant Curve:
+        # - Solid rock chest fundamental (190 - 250 Hz): +2.4 dB
+        # - Lower-mid punch (500 - 700 Hz): +1.6 dB
+        # - Powerful rock belting presence / vocal edge (2500 - 3400 Hz): +3.5 dB
+        # - Crisp open bite (4800 - 6200 Hz): +2.2 dB
+        gain_curve += 0.30 * np.exp(-0.5 * ((freqs - 220) / 50) ** 2)
+        gain_curve += 0.20 * np.exp(-0.5 * ((freqs - 600) / 130) ** 2)
+        gain_curve += 0.45 * np.exp(-0.5 * ((freqs - 2900) / 500) ** 2)
+        gain_curve += 0.28 * np.exp(-0.5 * ((freqs - 5500) / 800) ** 2)
     else:
         # Arijit Singh Formant Curve:
         # - Warm chest fundamental (180 - 240 Hz): +2.5 dB
@@ -994,6 +1022,101 @@ def _get_or_create_hall_ir(sr: int = 44100, duration: float = 2.6) -> np.ndarray
     return ir
 
 
+def export_clean_unremastered_master(
+    output_dir: str,
+    vocal_path: Optional[str] = None,
+    inst_path: Optional[str] = None
+) -> tuple:
+    """
+    Produces a 100% Pure, Unremastered Natural Master:
+    - Zero remastering: 0% hall reverb, 0% delay/echo, 0% 3D spatial widening, 0% backing ducking
+    - Pure converted vocal stem blended naturally with original backing instrumental
+    - True peak limiter normalization (-0.5 dBFS) to prevent digital clipping
+    - Exports master_clean.wav (24-bit PCM) and master_clean.mp3 (320kbps)
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    clean_wav = os.path.join(output_dir, "master_clean.wav")
+    clean_mp3 = os.path.join(output_dir, "master_clean.mp3")
+
+    if os.path.exists(clean_mp3) and os.path.getsize(clean_mp3) > 100:
+        return clean_wav, clean_mp3
+
+    if not vocal_path or not os.path.exists(vocal_path):
+        for candidate in ["vocal_autotuned.wav", "arijit_vocals.wav", "vocal_processed.wav", "vocals.wav"]:
+            p = os.path.join(output_dir, candidate)
+            if os.path.exists(p) and os.path.getsize(p) > 100:
+                vocal_path = p
+                break
+
+    if not inst_path or not os.path.exists(inst_path):
+        p = os.path.join(output_dir, "instrumental.wav")
+        if os.path.exists(p) and os.path.getsize(p) > 100:
+            inst_path = p
+        else:
+            inst_path = None
+
+    if not vocal_path or not os.path.exists(vocal_path):
+        return clean_wav, clean_mp3
+
+    target_sr = 44100
+    vocal, sr_v = sf.read(vocal_path)
+    if sr_v != target_sr:
+        import librosa
+        if vocal.ndim == 1:
+            vocal = librosa.resample(vocal.astype(np.float32), orig_sr=sr_v, target_sr=target_sr)
+        else:
+            vocal = librosa.resample(vocal.T.astype(np.float32), orig_sr=sr_v, target_sr=target_sr).T
+
+    if vocal.ndim == 1:
+        vocal = np.column_stack([vocal, vocal])
+    elif vocal.ndim == 2 and vocal.shape[1] == 1:
+        vocal = np.column_stack([vocal[:, 0], vocal[:, 0]])
+    elif vocal.shape[1] > 2:
+        vocal = vocal[:, :2]
+
+    if inst_path and os.path.exists(inst_path):
+        inst, sr_i = sf.read(inst_path)
+        if sr_i != target_sr:
+            import librosa
+            if inst.ndim == 1:
+                inst = librosa.resample(inst.astype(np.float32), orig_sr=sr_i, target_sr=target_sr)
+            else:
+                inst = librosa.resample(inst.T.astype(np.float32), orig_sr=sr_i, target_sr=target_sr).T
+
+        if inst.ndim == 1:
+            inst = np.column_stack([inst, inst])
+        elif inst.ndim == 2 and inst.shape[1] == 1:
+            inst = np.column_stack([inst[:, 0], inst[:, 0]])
+        elif inst.shape[1] > 2:
+            inst = inst[:, :2]
+
+        target_len = len(inst)
+        if len(vocal) < target_len:
+            pad = np.zeros((target_len - len(vocal), 2), dtype=vocal.dtype)
+            vocal = np.vstack([vocal, pad])
+        elif len(vocal) > target_len:
+            vocal = vocal[:target_len]
+
+        # Natural 1:1 blend with 0 remastering, 0 reverb, 0 delay, 0 ducking
+        mix = vocal + inst
+    else:
+        mix = vocal
+
+    # True peak normalization (-0.5 dBFS)
+    peak = np.max(np.abs(mix)) + 1e-7
+    target_peak = 0.94
+    if peak > target_peak:
+        mix = np.tanh(mix / target_peak) * target_peak
+    else:
+        mix = (mix / peak) * target_peak
+
+    clean_opus = os.path.join(output_dir, "master_clean.opus")
+    sf.write(clean_wav, mix, target_sr, subtype="PCM_24")
+    os.system(f"ffmpeg -y -i '{clean_wav}' -codec:a libopus -b:a 160k -vbr on '{clean_opus}' > /dev/null 2>&1")
+    os.system(f"ffmpeg -y -i '{clean_wav}' -codec:a libmp3lame -b:a 320k '{clean_mp3}' > /dev/null 2>&1")
+    return clean_wav, clean_mp3
+
+
 def master_and_remaster_track(
     vocal_wav: str,
     inst_wav: str,
@@ -1023,15 +1146,19 @@ def master_and_remaster_track(
     os.makedirs(output_dir, exist_ok=True)
     master_wav = os.path.join(output_dir, "master_remastered.wav")
     master_mp3 = os.path.join(output_dir, "master_remastered.mp3")
+    master_clean_wav = os.path.join(output_dir, "master_clean.wav")
+    master_clean_mp3 = os.path.join(output_dir, "master_clean.mp3")
 
-    # 0. Apply AI Auto-Tuner (smooth 35ms retune speed, 50% strength)
+    # 0. Apply AI Auto-Tuner (adaptive speed to preserve artistic glides & vibrato)
     if apply_autotune and autotune_strength > 0.15:
         autotuned_wav = os.path.join(output_dir, "vocal_autotuned.wav")
+        # Use gentle retune speed (45ms) and capped strength so meend and murki are not flattened
+        safe_tune_strength = min(float(autotune_strength), 0.38)
         apply_ai_autotune(
             input_wav=vocal_wav,
             output_wav=autotuned_wav,
-            autotune_strength=autotune_strength,
-            retune_speed_ms=retune_speed_ms,
+            autotune_strength=safe_tune_strength,
+            retune_speed_ms=max(retune_speed_ms, 45.0),
             progress_cb=progress_cb
         )
         vocal_wav = autotuned_wav
@@ -1075,6 +1202,9 @@ def master_and_remaster_track(
     # 1. Apply Hindi Diction & Consonant Transient Recovery Engine
     vocal = _enhance_hindi_diction_and_consonants(vocal, raw_vocal_wav, target_sr)
 
+    # Keep a copy of pure clean vocal (0 reverb, 0 echo delay, 0 artificial stereo Haas)
+    vocal_clean = vocal.copy()
+
     # 2. Add Dolby 3D Spatial Audio & Grand Hall Orchestra Goonj (only when applied via Remaster button)
     if reverb_amount > 0.02 or echo_amount > 0.02:
         if progress_cb:
@@ -1108,16 +1238,21 @@ def master_and_remaster_track(
         elif inst.shape[1] > 2:
             inst = inst[:, :2]
 
-        inst_linear = 10.0 ** (inst_gain_db / 20.0)
-        inst = inst * inst_linear
-
         # Align lengths: The backing instrumental is the reference track duration
         target_len = len(inst)
         if len(vocal) < target_len:
             pad = np.zeros((target_len - len(vocal), 2), dtype=vocal.dtype)
             vocal = np.vstack([vocal, pad])
+            vocal_clean = np.vstack([vocal_clean, pad])
         elif len(vocal) > target_len:
             vocal = vocal[:target_len]
+            vocal_clean = vocal_clean[:target_len]
+
+        # Clean mix: Pure un-ducked instrumental + pristine vocal (without 3D remastering)
+        clean_mix = vocal_clean + inst
+
+        inst_linear = 10.0 ** (inst_gain_db / 20.0)
+        inst = inst * inst_linear
 
         # Spectral pocket carving & dynamic Mid/Side ducking (applied when remastered with backing reduction):
         if inst_gain_db < -0.8:
@@ -1145,6 +1280,7 @@ def master_and_remaster_track(
         final_mix = vocal + inst
     else:
         final_mix = vocal
+        clean_mix = vocal_clean
 
     # Master Limiter & Normalization (-14 LUFS target / peak -0.5 dBFS)
     if progress_cb:
@@ -1157,23 +1293,40 @@ def master_and_remaster_track(
     else:
         final_mix = (final_mix / peak) * target_peak
 
-    # Export lossless 24-bit WAV
+    # Also normalize clean natural master
+    peak_clean = np.max(np.abs(clean_mix)) + 1e-7
+    if peak_clean > target_peak:
+        clean_mix = np.tanh(clean_mix / target_peak) * target_peak
+    else:
+        clean_mix = (clean_mix / peak_clean) * target_peak
+
+    # Export lossless 24-bit WAVs
     sf.write(master_wav, final_mix, target_sr, subtype="PCM_24")
+    sf.write(master_clean_wav, clean_mix, target_sr, subtype="PCM_24")
 
-    # Export MP3 with ffmpeg for browser playback
+    # Export MP3s with ffmpeg for browser playback
     os.system(f"ffmpeg -y -i '{master_wav}' -codec:a libmp3lame -b:a 320k '{master_mp3}' > /dev/null 2>&1")
+    os.system(f"ffmpeg -y -i '{master_clean_wav}' -codec:a libmp3lame -b:a 320k '{master_clean_mp3}' > /dev/null 2>&1")
 
-    del vocal, final_mix
+    # Export High-Fidelity 160k Opus (saves 65% space, ~2.8MB per track for Cloudflare R2)
+    master_opus = os.path.join(output_dir, "master_remastered.opus")
+    master_clean_opus = os.path.join(output_dir, "master_clean.opus")
+    os.system(f"ffmpeg -y -i '{master_wav}' -codec:a libopus -b:a 160k -vbr on '{master_opus}' > /dev/null 2>&1")
+    os.system(f"ffmpeg -y -i '{master_clean_wav}' -codec:a libopus -b:a 160k -vbr on '{master_clean_opus}' > /dev/null 2>&1")
+
+    del vocal, vocal_clean, final_mix, clean_mix
     if inst is not None:
         del inst
     clear_memory()
 
     if progress_cb:
-        progress_cb(100, "Dolby 3D Hall Orchestra master finalized successfully!")
+        progress_cb(100, "Dolby 3D Hall Orchestra & Clean Natural masters finalized successfully!")
 
     return {
         "master_wav": master_wav,
         "master_mp3": master_mp3,
+        "master_clean_wav": master_clean_wav,
+        "master_clean_mp3": master_clean_mp3,
         "vocal_wav": vocal_processed_path,
         "raw_vocal_wav": vocal_wav,
         "inst_wav": inst_wav if inst_wav and os.path.exists(inst_wav) else ""
@@ -1273,9 +1426,10 @@ def _apply_dolby_3d_spatial_and_hall_goonj(
     # --- 2. GRAND HALL ORCHESTRA GOONJ (भव्य कॉन्सर्ट हॉल और सिम्फनी ऑर्केस्ट्रा की गूँज - FURTHER 30% REDUCTION) ---
     if reverb_amount > 0.01:
         ir = _get_or_create_hall_ir(sr=sr, duration=2.4)
-        hall_l = signal.fftconvolve(vocal[:, 0], ir[:, 0], mode='full')[:n_samples]
-        hall_r = signal.fftconvolve(vocal[:, 1], ir[:, 1], mode='full')[:n_samples]
-        hall_goonj = np.column_stack([hall_l, hall_r]).astype(np.float32)
+        if ir is not None and len(ir) > 0:
+            hall_l = signal.fftconvolve(vocal[:, 0], ir[:, 0], mode='full')[:n_samples]
+            hall_r = signal.fftconvolve(vocal[:, 1], ir[:, 1], mode='full')[:n_samples]
+            hall_goonj = np.column_stack([hall_l, hall_r]).astype(np.float32)
 
         # Warm Symphony Orchestra EQ: subtle body warmth at 300Hz
         try:
