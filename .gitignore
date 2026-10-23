@@ -38,3 +38,6 @@ frontend/dist/
 # Operating System files
 .DS_Store
 Thumbs.db
+
+# Runtime job database
+backend/jobs_db.json
