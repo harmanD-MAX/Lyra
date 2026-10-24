@@ -20,6 +20,8 @@ from fastapi.staticfiles import StaticFiles
 from jobs import job_manager
 import audio_processor
 import r2_storage
+import engines
+import resources
 import separation
 import studio_pipeline
 import voices
@@ -184,7 +186,8 @@ async def startup_scan_jobs():
 
 # One GPU/CPU-heavy job at a time: separation, RVC and training all compete for
 # the same memory, so a single worker keeps runs fast and predictable.
-JOB_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lyra-job")
+JOB_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lyra-job",
+                                  initializer=resources.apply_worker_limits)
 
 
 def run_pipeline(job_id: str, params: "studio_pipeline.JobParams"):
@@ -223,6 +226,8 @@ def run_pipeline(job_id: str, params: "studio_pipeline.JobParams"):
             "midi": f"/api/midi/{job_id}" if out["midi"] else "",
             "analysis": out["analysis"],
             "engine": out["engine"],
+            "engine_label": out["engine_label"],
+            "engine_reason": out["engine_reason"],
             "separation_engine": out["separation_engine"],
             "settings": params.to_dict(),
         }
@@ -245,6 +250,8 @@ def run_pipeline(job_id: str, params: "studio_pipeline.JobParams"):
                 }, f, indent=2)
         except Exception as err:
             print("Could not save job meta.json:", err)
+        freed = resources.cleanup_job(job_dir)
+        print(f"Job {job_id}: removed {freed:.0f} MB of temporary files")
     except BaseException as e:
         print(f"Error in job {job_id}: {traceback.format_exc()}")
         job_manager.update_job(job_id, status="error", error=str(e))
@@ -271,6 +278,7 @@ async def start_conversion(
     spotify_url: Optional[str] = Form(None),
     mode: str = Form("convert"),
     model_name: str = Form("arijit_singh"),
+    engine: str = Form("auto"),
     pitch_shift: int = Form(0),
     f0_method: str = Form("rmvpe"),
     index_rate: Optional[float] = Form(None),
@@ -323,6 +331,7 @@ async def start_conversion(
         file_path=_save_upload(audio_file, job_id) if audio_file else None,
         url=None if audio_file else url,
         model_name=model_name,
+        engine=engine if engine in ("auto", "rvc", "seedvc") else "auto",
         pitch_shift=pitch_shift,
         f0_method=f0_method,
         index_rate=index_rate,
@@ -417,7 +426,8 @@ async def upload_voice(name: str = Form(...), model_file: UploadFile = File(...)
 async def train_voice(
     name: str = Form(...),
     recordings: list[UploadFile] = File(...),
-    steps: int = Form(2000),
+    preset: str = Form("standard"),
+    steps: Optional[int] = Form(None),
 ):
     """Train a personal voice model from 10-20 minutes of your own recordings."""
     meta = voices.new_voice(name, status="queued")
@@ -425,18 +435,30 @@ async def train_voice(
     data_dir = os.path.join(voices.CUSTOM_ROOT, vid, "recordings")
     os.makedirs(data_dir, exist_ok=True)
     paths = []
+    import subprocess
     for i, rec in enumerate(recordings):
-        dest = os.path.join(data_dir, f"{i:03d}_{os.path.basename(rec.filename or 'take.wav')}")
-        with open(dest, "wb") as f:
+        raw = os.path.join(data_dir, f"{i:03d}_{os.path.basename(rec.filename or 'take')}")
+        with open(raw, "wb") as f:
             shutil.copyfileobj(rec.file, f)
-        paths.append(dest)
-    steps = int(max(200, min(steps, 20000)))
+        # Browser recordings arrive as webm/ogg; normalise everything to WAV
+        dest = os.path.splitext(raw)[0] + ".wav"
+        try:
+            subprocess.run(["ffmpeg", "-y", "-i", raw, "-ar", "44100", "-ac", "1", dest], capture_output=True, check=True)
+            if dest != raw:
+                os.remove(raw)
+            paths.append(dest)
+        except Exception:
+            paths.append(raw)
+    if preset not in ("quick", "standard", "best"):
+        preset = "standard"
+    if steps is not None:
+        steps = int(max(200, min(steps, 20000)))
 
     def _work():
         import voice_training
         try:
             audio_processor.unload_vc_cache()
-            voice_training.train_personal_voice(vid, paths, steps=steps)
+            voice_training.train_personal_voice(vid, paths, steps=steps, preset=preset)
         except Exception as e:
             print(f"Voice training failed for {vid}: {e}")
 
@@ -458,6 +480,65 @@ async def delete_voice(voice_id: str):
     if not voices.delete_voice(voice_id):
         raise HTTPException(status_code=404, detail="Voice not found")
     return JSONResponse(content={"status": "deleted", "id": voice_id})
+
+
+@app.post("/api/models/{model_id}/reference")
+async def upload_reference(model_id: str, sample: UploadFile = File(...)):
+    """A dry, solo clip of a voice (10-30s) that lets Seed-VC sing as it."""
+    info = audio_processor.resolve_model_info(model_id)
+    if info["id"] != model_id:
+        raise HTTPException(status_code=404, detail="Unknown voice")
+    src = _save_upload(sample, f"ref_{int(time.time() * 1000)}")
+    try:
+        path = engines.save_reference_upload(src, info)
+    finally:
+        try:
+            os.remove(src)
+        except Exception:
+            pass
+    if not path:
+        raise HTTPException(status_code=400, detail="No clear singing found in that clip")
+    return JSONResponse(content={"status": "ok", "engines": engines.engine_options(info)})
+
+
+@app.get("/api/storage")
+async def storage_status():
+    return JSONResponse(content=resources.storage_report(OUTPUTS_DIR))
+
+
+@app.post("/api/storage/cleanup")
+async def storage_cleanup():
+    """Remove temporary files from every finished song (results are kept)."""
+    freed = 0.0
+    for jid in os.listdir(OUTPUTS_DIR):
+        jdir = os.path.join(OUTPUTS_DIR, jid)
+        job = job_manager.get_job(jid)
+        if os.path.isdir(jdir) and (not job or job.get("status") in ("completed", "error")):
+            freed += resources.cleanup_job(jdir)
+    for name in os.listdir(UPLOADS_DIR):
+        p = os.path.join(UPLOADS_DIR, name)
+        if os.path.isfile(p) and time.time() - os.path.getmtime(p) > 3600:
+            freed += os.path.getsize(p) / 1e6
+            os.remove(p)
+    return JSONResponse(content={"freed_mb": round(freed), **resources.storage_report(OUTPUTS_DIR)})
+
+
+@app.get("/api/engines")
+async def engine_status():
+    """Which voice engines are installed and which one each voice will use."""
+    per_voice = {}
+    ids = list(audio_processor.AVAILABLE_MODELS) + [v["id"] for v in voices.list_custom_voices()]
+    for vid in ids:
+        info = audio_processor.resolve_model_info(vid)
+        engine, reason = engines.choose_engine(info, "auto")
+        per_voice[vid] = {"available": engines.engine_options(info), "auto": engine, "reason": reason,
+                          "label": engines.ENGINE_LABELS.get(engine, engine)}
+    return JSONResponse(content={
+        "seedvc_installed": engines.seedvc_available(),
+        "labels": engines.ENGINE_LABELS,
+        "voices": per_voice,
+        "benchmark": engines.read_engine_choices(),
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -911,7 +992,7 @@ async def get_audio_file(job_id: str, track_type: str, request: Request, downloa
                     file_path = alt_p
                     break
         elif track_type in ["vocal_original", "input"]:
-            for alt in ["vocals.wav", "input_audio.wav"]:
+            for alt in ["vocals.wav", "input_audio.wav", "vocals_lead_dry.wav", "vocals_timing_aligned.wav"]:
                 alt_p = os.path.join(job_dir, alt)
                 if os.path.exists(alt_p) and os.path.getsize(alt_p) > 100:
                     file_path = alt_p
@@ -995,9 +1076,18 @@ async def get_system_info():
         "torch_device": "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"),
         "separation": {"vocals": separation.VOCAL_MODEL, "karaoke": separation.KARAOKE_MODEL, "dereverb": separation.DEREVERB_MODEL},
         "personal_voices": len(voices.list_custom_voices()),
+        "seedvc_available": engines.seedvc_available(),
+        "resources": resources.storage_report(OUTPUTS_DIR),
         "demucs_ready": True,
         "autotune_ready": True
     }
+
+
+# Serve the built frontend (npm run build) from the same process, so a small
+# machine doesn't need the Vite dev server running. API routes take priority.
+FRONTEND_DIST = os.path.join(os.path.dirname(BASE_DIR), "frontend", "dist")
+if os.path.isdir(FRONTEND_DIST):
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
 
 
 if __name__ == "__main__":

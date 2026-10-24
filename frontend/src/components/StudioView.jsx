@@ -40,6 +40,20 @@ export default function StudioView({
   onOpenVoiceLab
 }) {
   const [showComposerTools, setShowComposerTools] = useState(false);
+  const [storage, setStorage] = useState(null);
+  const [cleaning, setCleaning] = useState(false);
+  useEffect(() => {
+    fetch('/api/storage').then((r) => (r.ok ? r.json() : null)).then(setStorage).catch(() => {});
+  }, [recentJobs.length]);
+  const freeUpSpace = async () => {
+    setCleaning(true);
+    try {
+      const r = await fetch('/api/storage/cleanup', { method: 'POST' });
+      if (r.ok) setStorage(await r.json());
+    } finally {
+      setCleaning(false);
+    }
+  };
   // Navigation tabs in sidebar: 'studio' | 'my-songs' (Templates & Settings removed per request)
   const [activeTab, setActiveTab] = useState('studio');
 
@@ -743,7 +757,7 @@ export default function StudioView({
   );
 
   return (
-    <div className="flex h-screen w-full bg-[#0d0f12] text-white overflow-hidden font-sans select-none">
+    <div className="flex h-screen w-full bg-[#07080a] text-white overflow-hidden font-sans select-none">
 
       {/* HTML5 Synchronized Multi-Stem Audio Elements Engine */}
       {STEM_KEYS.map((stemKey) => (
@@ -804,7 +818,7 @@ export default function StudioView({
       {/* =========================================================================
           LEFT SIDEBAR (Apple-grade Studio layout with original Lyra logo)
          ========================================================================= */}
-      <aside className="w-64 sm:w-72 bg-[#121418] border-r border-white/5 flex flex-col justify-between p-4 flex-shrink-0 z-20">
+      <aside className="w-64 sm:w-72 bg-[#0b0c0f]/90 backdrop-blur-xl border-r border-white/[0.07] flex flex-col justify-between p-4 flex-shrink-0 z-20">
 
         <div className="space-y-4">
 
@@ -818,7 +832,7 @@ export default function StudioView({
               <LyraLogo />
               <span
                 className="text-lg font-bold uppercase tracking-[0.2em] text-white group-hover:text-[#e5a958] transition-colors leading-normal pb-0.5"
-                style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+                style={{ fontFamily: "var(--font-display)" }}
               >
                 Lyra
               </span>
@@ -882,7 +896,7 @@ export default function StudioView({
           <div className="pt-4 border-t border-white/5 space-y-2">
             <div className="text-[10px] uppercase font-bold tracking-wider text-white/40 px-2 flex items-center justify-between">
               <span>Vocalist Persona</span>
-              <span className="text-[#e5a958] font-mono">40kHz v2</span>
+              <span className="text-[#3fe0c5] font-mono">Seed-VC · RVC</span>
             </div>
 
             <div className="space-y-1.5">
@@ -897,8 +911,8 @@ export default function StudioView({
                   type="button"
                   onClick={() => setSelectedModel(model.id)}
                   className={`w-full text-left p-2.5 rounded-xl border text-xs transition-all cursor-pointer ${selectedModel === model.id
-                      ? 'bg-[#1e222a] border-[#e5a958]/50 text-white shadow-sm ring-1 ring-[#e5a958]/30'
-                      : 'bg-[#15171d]/60 border-white/5 text-white/60 hover:text-white hover:border-white/10'
+                      ? 'bg-[#e5a958]/[0.08] border-[#e5a958]/50 text-white shadow-sm ring-1 ring-[#e5a958]/30'
+                      : 'bg-white/[0.03] border-white/5 text-white/60 hover:text-white hover:border-white/10'
                     }`}
                 >
                   <div className="flex items-center justify-between">
@@ -923,14 +937,40 @@ export default function StudioView({
         </div>
 
         {/* Engine Hardware Status Card at Bottom */}
-        <div className="p-3 rounded-xl bg-[#17191f] border border-white/5 text-[11px] space-y-1">
+        <div className="p-3 rounded-xl bg-white/[0.04] border border-white/5 text-[11px] space-y-1">
           <div className="flex items-center justify-between text-white/60">
-            <span>Neural Engine</span>
-            <span className="text-[#e5a958] font-mono">Online</span>
+            <span>Voice engines</span>
+            <span className="text-[#3fe0c5] font-mono">Online</span>
+          </div>
+          <div className="flex flex-wrap gap-1 pt-1">
+            <span className={`px-2 py-0.5 rounded-full border text-[10px] font-mono ${sysInfo?.seedvc_available ? 'border-[#3fe0c5]/40 text-[#3fe0c5]' : 'border-white/10 text-white/35'}`} title={sysInfo?.seedvc_available ? 'Seed-VC singing engine installed' : 'Run backend/tools/setup_seedvc.sh to enable Seed-VC'}>
+              Seed-VC {sysInfo?.seedvc_available ? '✓' : '· not installed'}
+            </span>
+            <span className="px-2 py-0.5 rounded-full border border-[#e5a958]/40 text-[#e5a958] text-[10px] font-mono">RVC v2 48k ✓</span>
           </div>
           <div className="text-[10px] text-white/40 truncate font-mono">
-            {sysInfo?.torch_device === 'mps' ? 'Apple Silicon Hardware Acceleration' : 'Lyra Pro Neural Engine'} • 40kHz Studio PCM
+            {sysInfo?.torch_device === 'cuda' ? 'NVIDIA GPU' : sysInfo?.torch_device === 'mps' ? 'Apple Silicon' : 'CPU'} acceleration
           </div>
+          {storage && (
+            <div className="pt-2 mt-1 border-t border-white/5 space-y-1.5">
+              <div className="flex items-center justify-between text-white/60">
+                <span>Storage</span>
+                <span className={`font-mono text-[10px] ${storage.free_gb < 6 ? 'text-rose-300' : 'text-white/50'}`}>{storage.free_gb} GB free</span>
+              </div>
+              <div className="text-[10px] text-white/40 font-mono">
+                {storage.profile === 'lite' ? 'Lite mode · small models' : 'Standard mode'} · songs {storage.songs_mb} MB
+              </div>
+              <button
+                type="button"
+                onClick={freeUpSpace}
+                disabled={cleaning}
+                className="w-full mt-1 px-2 py-1.5 rounded-lg border border-white/10 hover:border-white/25 text-[10px] text-white/70 hover:text-white cursor-pointer disabled:opacity-50"
+                title="Deletes temporary files from finished songs. Your masters, stems and MIDI are kept."
+              >
+                {cleaning ? 'Cleaning…' : 'Free up space'}
+              </button>
+            </div>
+          )}
         </div>
 
       </aside>
@@ -938,7 +978,10 @@ export default function StudioView({
       {/* ========================================================================      {/* =========================================================================
           MAIN WORKSPACE (Fixed, Non-Scrollable Viewport Console)
          ========================================================================= */}
-      <main className="flex-1 flex flex-col bg-[#0b0c0e] h-screen overflow-hidden relative">
+      <main className="flex-1 flex flex-col bg-transparent h-screen overflow-hidden relative">
+        {/* Same backdrop as the landing page: perspective grid + warm/teal glow */}
+        <div className="hero-grid absolute inset-0 pointer-events-none" />
+        <div className="aurora pointer-events-none absolute -top-48 right-[-15%] w-[900px] h-[560px] opacity-70" />
 
         {/* Fixed Viewport Main Canvas (No Outer Page Scrolling) */}
         <div className="flex-1 h-full overflow-hidden px-4 sm:px-8 py-4 sm:py-5 flex flex-col justify-center">
@@ -953,7 +996,7 @@ export default function StudioView({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-white/10 flex-shrink-0">
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-3">
-                    <h3 className="text-xl sm:text-2xl font-bold text-white tracking-tight pb-1 leading-normal" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+                    <h3 className="text-xl sm:text-2xl font-bold text-white tracking-tight pb-1 leading-normal" style={{ fontFamily: "var(--font-display)" }}>
                       My Created Songs
                     </h3>
                     <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-[#e5a958]/15 text-[#e5a958] border border-[#e5a958]/30">
@@ -967,7 +1010,7 @@ export default function StudioView({
               </div>
 
               {recentJobs.length === 0 ? (
-                <div className="p-16 text-center space-y-3 rounded-2xl bg-[#14161c] border border-white/5 my-auto">
+                <div className="p-16 text-center space-y-3 rounded-2xl bg-white/[0.04] border border-white/5 my-auto">
                   <Disc className="w-10 h-10 text-white/20 mx-auto animate-spin-slow" />
                   <p className="text-base font-semibold text-white/80">No songs created yet</p>
                   <p className="text-xs text-white/50 max-w-sm mx-auto">
@@ -982,7 +1025,7 @@ export default function StudioView({
                   </button>
                 </div>
               ) : (
-                <div className="bg-[#121418] border border-white/10 rounded-2xl flex-1 min-h-0 flex flex-col overflow-hidden shadow-2xl">
+                <div className="bg-[#0e1013]/80 border border-white/10 rounded-2xl flex-1 min-h-0 flex flex-col overflow-hidden shadow-2xl">
                   {/* Fixed Tracklist Column Headers */}
                   <div className="grid grid-cols-12 px-5 py-3 text-[11px] font-mono text-white/40 uppercase tracking-wider border-b border-white/5 bg-black/40 flex-shrink-0">
                     <div className="col-span-1 text-center">#</div>
@@ -1124,7 +1167,7 @@ export default function StudioView({
 
               {/* Viewport-Fitted Studio Master Console */}
               {currentResults && (
-                <div className="bg-[#121418] border border-white/10 rounded-3xl p-5 sm:p-6 shadow-2xl flex flex-col justify-between max-h-[calc(100vh-3rem)] overflow-hidden animate-fadeIn relative my-auto">
+                <div className="studio-glass border border-white/10 rounded-3xl p-5 sm:p-6 shadow-2xl flex flex-col justify-between max-h-[calc(100vh-3rem)] overflow-hidden animate-fadeIn relative my-auto">
 
                   {/* Subtle Top Acoustic Rim Glow */}
                   <div className="absolute top-0 left-1/4 right-1/4 h-[1px] bg-gradient-to-r from-transparent via-[#e5a958]/50 to-transparent" />
@@ -1148,7 +1191,7 @@ export default function StudioView({
                           cleanTitle = cleanTitle.replace(/-\s*Topic/gi, '');
                           cleanTitle = cleanTitle.trim() || 'Studio Audio Project';
                           return (
-                            <h3 className="text-base sm:text-xl font-bold text-white tracking-tight truncate pb-1 leading-normal" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+                            <h3 className="text-base sm:text-xl font-bold text-white tracking-tight truncate pb-1 leading-normal" style={{ fontFamily: "var(--font-display)" }}>
                               {cleanTitle}
                             </h3>
                           );
@@ -1178,7 +1221,7 @@ export default function StudioView({
                   </div>
 
                   {/* Audio Waveform Player with Smooth Scrubber & Seamless Stems */}
-                  <div className="bg-[#171a21] border border-white/10 rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col justify-between gap-2.5 my-2 flex-1 min-h-0 overflow-hidden">
+                  <div className="bg-white/[0.04] border border-white/10 rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col justify-between gap-2.5 my-2 flex-1 min-h-0 overflow-hidden">
 
                     {/* Top Row of Player: Active Stem Name + Duration & Live Volume */}
                     <div className="flex items-center justify-between gap-3 pb-1.5 border-b border-white/5 flex-shrink-0">
@@ -1308,7 +1351,7 @@ export default function StudioView({
                         onChange={handleSeekChange}
                         onMouseUp={handleSeekEnd}
                         onTouchEnd={handleSeekEnd}
-                        className="w-full h-1.5 bg-[#101216] rounded-lg appearance-none cursor-pointer accent-[#e5a958] hover:accent-[#ffcf87] transition-all"
+                        className="w-full h-1.5 bg-white/[0.03] rounded-lg appearance-none cursor-pointer accent-[#e5a958] hover:accent-[#ffcf87] transition-all"
                       />
                       <div className="flex justify-between text-[11px] font-mono text-white/50 px-1">
                         <span>{formatTime(isSeeking ? seekTime : currentTime)}</span>
@@ -1402,7 +1445,7 @@ export default function StudioView({
 
                   {/* Compact Viewport-Safe Acoustic & Dolby Remastering Rack */}
                   {showAcousticPanel && (
-                    <div className="p-3.5 rounded-2xl bg-[#171a21] border border-white/10 space-y-2 animate-fadeIn shadow-2xl flex-shrink-0 mb-2">
+                    <div className="p-3.5 rounded-2xl bg-white/[0.04] border border-white/10 space-y-2 animate-fadeIn shadow-2xl flex-shrink-0 mb-2">
                       <div className="flex flex-wrap items-center justify-between gap-2 pb-1 border-b border-white/5">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Sliders className="w-3.5 h-3.5 text-[#e5a958]" />
@@ -1443,7 +1486,7 @@ export default function StudioView({
                             type="button"
                             onClick={() => handleApplyRemix()}
                             disabled={isRemixing}
-                            className="px-3 py-1 rounded-lg bg-[#e5a958] text-black font-semibold text-xs hover:bg-[#ffcf87] active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 shadow-md"
+                            className="px-3 py-1 rounded-lg bg-[#e5a958] text-black font-semibold text-xs hover:bg-[#f0bb6e] active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 shadow-md"
                             title="Apply custom slider values to master"
                           >
                             {isRemixing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
@@ -1601,19 +1644,18 @@ export default function StudioView({
                   SONG INGESTION DOCK (Completely Fixed Height - Zero Jumping/Shrinking)
                  ================================================================= */}
               {(!currentResults && !activeJobId) && (
-                <div className="bg-[#121418] border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col justify-between max-w-6xl w-full mx-auto relative overflow-hidden my-auto">
+                <div className="studio-glass border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col justify-between max-w-6xl w-full mx-auto relative overflow-hidden my-auto">
 
                   {/* Subtle Top Ambient Rim Glow */}
                   <div className="absolute top-0 left-1/4 right-1/4 h-[1px] bg-gradient-to-r from-transparent via-[#e5a958]/40 to-transparent" />
 
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-white/10 flex-shrink-0">
                     <div className="space-y-0.5">
-                      <h3 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2.5 pb-1 leading-normal overflow-visible" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-                        <Sparkles className="w-5 h-5 text-[#e5a958]" />
-                        <span>Universal Song Ingestion</span>
+                      <h3 className="text-2xl sm:text-3xl font-bold text-white pb-1 leading-tight overflow-visible" style={{ fontFamily: "var(--font-display)" }}>
+                        Bring in a <span className="font-accent text-[#e5a958] pr-1">song</span> or a take
                       </h3>
                       <p className="text-xs sm:text-sm text-white/60">
-                        Upload an audio file, paste a Spotify or YouTube link, or record live with studio fidelity.
+                        Upload a file, paste a Spotify or YouTube link, or record yourself right here.
                       </p>
                     </div>
 
@@ -1626,7 +1668,7 @@ export default function StudioView({
                   </div>
 
                   {/* 4 Ingestion Method Tabs */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[#0e1014] p-1.5 rounded-2xl border border-white/5 my-4 flex-shrink-0">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white/[0.035] p-1.5 rounded-2xl border border-white/5 my-4 flex-shrink-0">
                     {[
                       { id: 'file', label: 'Audio File Upload', icon: Upload },
                       { id: 'spotify', label: 'Spotify Track URL', icon: LinkIcon },
@@ -1645,7 +1687,7 @@ export default function StudioView({
                             setIngestMethod(tab.id);
                           }}
                           className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${isActive
-                              ? 'bg-[#1e222a] text-[#e5a958] shadow-md border border-white/10'
+                              ? 'bg-[#e5a958]/[0.08] text-[#e5a958] shadow-md border border-white/10'
                               : 'text-white/60 hover:text-white hover:bg-white/5'
                             }`}
                         >
@@ -1686,7 +1728,7 @@ export default function StudioView({
                         />
 
                         {audioFile && !audioFile.name?.startsWith('vocal_recording_') ? (
-                          <div className="h-full flex flex-col justify-center space-y-3.5 bg-[#0e1014] p-4 sm:p-5 rounded-2xl border border-white/10 shadow-lg">
+                          <div className="h-full flex flex-col justify-center space-y-3.5 bg-white/[0.035] p-4 sm:p-5 rounded-2xl border border-white/10 shadow-lg">
                             {/* Top row: Status, File info & Change file button */}
                             <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
                               <div className="flex items-center gap-3.5 min-w-0 flex-1">
@@ -1778,7 +1820,7 @@ export default function StudioView({
 
 
                               {/* In-Card Audio Playback Preview */}
-                              <div className="flex items-center gap-3 bg-[#15171d] border border-white/10 rounded-xl px-3.5 py-2.5">
+                              <div className="flex items-center gap-3 bg-white/[0.03] border border-white/10 rounded-xl px-3.5 py-2.5">
                                 <button
                                   type="button"
                                   onClick={togglePreviewPlay}
@@ -1827,7 +1869,7 @@ export default function StudioView({
                             onClick={() => fileInputRef.current?.click()}
                             className={`h-full min-h-[190px] border-2 border-dashed rounded-2xl p-5 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-300 ${dragActive
                                 ? 'border-[#e5a958] bg-[#e5a958]/10'
-                                : 'border-white/15 hover:border-white/30 bg-[#0e1014]/60 hover:bg-[#0e1014]'
+                                : 'border-white/15 hover:border-white/30 bg-white/[0.035] hover:bg-white/[0.035]'
                               }`}
                           >
                             <div className="space-y-2">
@@ -1853,7 +1895,7 @@ export default function StudioView({
 
                     {/* METHOD 2: Spotify Track URL */}
                     {ingestMethod === 'spotify' && (
-                      <div className="h-full flex flex-col justify-center space-y-3 bg-[#0e1014] p-5 sm:p-6 rounded-2xl border border-white/5">
+                      <div className="h-full flex flex-col justify-center space-y-3 bg-white/[0.035] p-5 sm:p-6 rounded-2xl border border-white/5">
                         <div className="space-y-0.5">
                           <label className="text-xs font-semibold text-white/90 uppercase tracking-wider block">
                             Spotify Song or Track Link
@@ -1863,7 +1905,7 @@ export default function StudioView({
                           </p>
                         </div>
 
-                        <div className="flex items-center gap-3 bg-[#15171d] border border-white/10 rounded-2xl px-4 py-3 focus-within:border-green-500 transition-all shadow-inner">
+                        <div className="flex items-center gap-3 bg-white/[0.03] border border-white/10 rounded-2xl px-4 py-3 focus-within:border-green-500 transition-all shadow-inner">
                           <span className="text-xs font-bold text-green-400 font-mono px-2 py-0.5 rounded bg-green-500/10 border border-green-500/20">
                             Spotify
                           </span>
@@ -1907,7 +1949,7 @@ export default function StudioView({
 
                     {/* METHOD 3: YouTube Video URL */}
                     {ingestMethod === 'youtube' && (
-                      <div className="h-full flex flex-col justify-center space-y-3 bg-[#0e1014] p-5 sm:p-6 rounded-2xl border border-white/5">
+                      <div className="h-full flex flex-col justify-center space-y-3 bg-white/[0.035] p-5 sm:p-6 rounded-2xl border border-white/5">
                         <div className="space-y-0.5">
                           <label className="text-xs font-semibold text-white/90 uppercase tracking-wider block">
                             YouTube Video or Music URL
@@ -1917,7 +1959,7 @@ export default function StudioView({
                           </p>
                         </div>
 
-                        <div className="flex items-center gap-3 bg-[#15171d] border border-white/10 rounded-2xl px-4 py-3 focus-within:border-red-500 transition-all shadow-inner">
+                        <div className="flex items-center gap-3 bg-white/[0.03] border border-white/10 rounded-2xl px-4 py-3 focus-within:border-red-500 transition-all shadow-inner">
                           <span className="text-xs font-bold text-red-400 font-mono px-2 py-0.5 rounded bg-red-500/10 border border-red-500/20">
                             YouTube
                           </span>
@@ -1939,7 +1981,7 @@ export default function StudioView({
 
                     {/* METHOD 4: Microphone Recording */}
                     {ingestMethod === 'record' && (
-                      <div className="h-full flex flex-col justify-center space-y-4 bg-[#0e1014] p-5 sm:p-6 rounded-2xl border border-white/5">
+                      <div className="h-full flex flex-col justify-center space-y-4 bg-white/[0.035] p-5 sm:p-6 rounded-2xl border border-white/5">
 
                         {/* Top row: Status, Title, Recording state / Action buttons */}
                         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -2005,7 +2047,7 @@ export default function StudioView({
                               <button
                                 type="button"
                                 onClick={startRecording}
-                                className="px-5 py-2.5 rounded-xl bg-[#e5a958] hover:bg-[#ffcf87] text-black font-bold text-xs transition-all shadow-lg cursor-pointer active:scale-95"
+                                className="px-5 py-2.5 rounded-xl bg-[#e5a958] hover:bg-[#f0bb6e] text-black font-bold text-xs transition-all shadow-lg cursor-pointer active:scale-95"
                               >
                                 Start Recording
                               </button>
@@ -2059,7 +2101,7 @@ export default function StudioView({
 
 
                             {/* In-Card Audio Playback Preview */}
-                            <div className="flex items-center gap-3 bg-[#15171d] border border-white/10 rounded-xl px-3.5 py-2.5">
+                            <div className="flex items-center gap-3 bg-white/[0.03] border border-white/10 rounded-xl px-3.5 py-2.5">
                               <button
                                 type="button"
                                 onClick={togglePreviewPlay}
@@ -2123,7 +2165,7 @@ export default function StudioView({
                       disabled={isSubmitting || !hasValidInput}
                       className={`w-full py-4 rounded-2xl font-bold text-sm sm:text-base flex items-center justify-center gap-3 transition-all shadow-2xl ${isSubmitting || !hasValidInput
                           ? 'bg-white/10 text-white/30 cursor-not-allowed border border-white/5'
-                          : 'bg-[#e5a958] hover:bg-[#ffcf87] text-black cursor-pointer active:scale-[0.99] shadow-[#e5a958]/25'
+                          : 'bg-[#e5a958] hover:bg-[#f0bb6e] text-black cursor-pointer active:scale-[0.99] shadow-[#e5a958]/25'
                         }`}
                     >
                       {isSubmitting ? (
@@ -2154,7 +2196,7 @@ export default function StudioView({
       {/* Cloudflare R2 Single-File Cloud Storage Confirmation Modal */}
       {showCloudModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-[#14171f] border border-[#e5a958]/35 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-[0_0_60px_rgba(229,169,88,0.2)] space-y-4 relative overflow-hidden animate-scaleIn">
+          <div className="bg-white/[0.04] border border-[#e5a958]/35 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-[0_0_60px_rgba(229,169,88,0.2)] space-y-4 relative overflow-hidden animate-scaleIn">
 
             {/* Top ambient glow */}
             <div className="absolute -top-16 -left-16 w-36 h-36 bg-[#e5a958]/20 rounded-full blur-3xl pointer-events-none" />
@@ -2178,7 +2220,7 @@ export default function StudioView({
 
             {/* Text Header */}
             <div className="text-center space-y-1">
-              <h3 className="text-base sm:text-lg font-bold text-white tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+              <h3 className="text-base sm:text-lg font-bold text-white tracking-tight" style={{ fontFamily: "var(--font-display)" }}>
                 Save Master 3D to Cloud Storage?
               </h3>
               <p className="text-xs text-white/60">
@@ -2211,7 +2253,7 @@ export default function StudioView({
                     executePendingAction(pendingAction);
                   }
                 }}
-                className="w-full py-3 px-4 rounded-xl bg-[#e5a958] hover:bg-[#ffcf87] text-black font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg active:scale-98 disabled:opacity-50"
+                className="w-full py-3 px-4 rounded-xl bg-[#e5a958] hover:bg-[#f0bb6e] text-black font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg active:scale-98 disabled:opacity-50"
               >
                 {isSavingToCloud ? (
                   <>

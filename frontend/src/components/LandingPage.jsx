@@ -201,29 +201,22 @@ const PIPELINE = [
   { icon: Scissors, title: 'Separate', body: 'Mel-Band RoFormer pulls the vocal out, then splits lead from backing harmonies.', glyph: 'separate' },
   { icon: Waves, title: 'Clean', body: 'De-reverb strips room tails so the voice model hears only the voice.', glyph: 'clean' },
   { icon: Music4, title: 'Melody engine', body: 'Key detection, note-level tuning, guide-melody & timing alignment — on the pitch curve.', glyph: 'melody' },
-  { icon: Mic2, title: 'Render', body: 'Synthesized once: as a singer, your trained voice, or your untouched timbre.', glyph: 'render' },
+  { icon: Mic2, title: 'Render', body: 'Seed-VC singing diffusion or RVC v2 48 kHz — whichever scores best for that voice.', glyph: 'render' },
   { icon: Layers, title: 'Mix & export', body: 'Master, 24-bit stems, MIDI melody, key & BPM — ready for your DAW.', glyph: 'export' },
 ];
 
-const HERO_WORDS = ['Arijit', 'Sonu', 'KK', 'yourself'];
 
 const FAQ = [
   ['I can\'t sing. Will this actually help?', 'Yes — that\'s what My Voice mode is for. Sing your take (optionally over the original song). Lyra aligns your timing to the original, moves your notes onto the melody, steadies wobble and can add gentle vibrato. Then you choose: keep your own voice, or have it sung by a voice model.'],
   ['How do I keep sounding like me?', 'Pick "Your voice" as the target. Without training, Lyra re-synthesizes your own timbre with the corrected melody. For the best quality, record 10–20 minutes of yourself (reading + scales) in the Voice Lab and train a personal model.'],
   ['What do composers get out of it?', 'Every render exports 24-bit dry stems (converted lead, harmony, original backing vocals, instrumental), a MIDI file of the final melody, and the detected key and tempo. You can re-render a single section with new settings without redoing the song.'],
+  ['Which AI models does Lyra use?', 'Two singing engines. Seed-VC singing (a 2024 diffusion model with Whisper and BigVGAN, 44.1 kHz) sings as a voice from a short sample and, in its authors\' published test against trained RVC v2 48 kHz models, scored higher on likeness and much better on lyric clarity. RVC v2 (now trained at up to 48 kHz) keeps the tightest pitch and cleanest audio. Lyra\'s benchmark compares both on your voices and uses the winner; you can also pick one under Advanced settings.'],
   ['Which hardware do I need?', 'An NVIDIA GPU or Apple Silicon Mac makes separation and training fast. Everything also runs on CPU, just slower. Jobs run one at a time so memory stays predictable.'],
   ['Is it OK to use famous voices?', 'Lyra is a personal, for-fun project. Voice likeness is protected in many places, so keep celebrity-voice renders private and don\'t publish or monetise them. Your own voice is always yours to use.'],
 ];
 
 export default function LandingPage({ onLaunchStudio }) {
   const [openFaq, setOpenFaq] = useState(0);
-  const [wordIdx, setWordIdx] = useState(0);
-
-  useEffect(() => {
-    if (prefersReducedMotion()) return undefined;
-    const id = setInterval(() => setWordIdx((i) => (i + 1) % HERO_WORDS.length), 2200);
-    return () => clearInterval(id);
-  }, []);
 
   const launch = (model, opts) => onLaunchStudio && onLaunchStudio(model, opts);
 
@@ -242,20 +235,14 @@ export default function LandingPage({ onLaunchStudio }) {
               </span>
             </Reveal>
             <Reveal delay={120}>
-              <h1 className="mt-6 text-[clamp(2.6rem,6.2vw,5.6rem)] leading-[0.95] font-bold tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-                Sing it badly.<br />
-                <span className="text-white/90">Hear it as </span>
-                <span className="relative inline-block min-w-[4ch] text-left">
-                  {HERO_WORDS.map((w, i) => (
-                    <span
-                      key={w}
-                      className={`absolute left-0 top-0 whitespace-nowrap bg-clip-text text-transparent transition-all ${i === wordIdx ? 'opacity-100 translate-y-0 blur-0 duration-700 delay-300' : 'opacity-0 -translate-y-5 blur-sm duration-300'}`}
-                      style={{ backgroundImage: `linear-gradient(100deg, ${GOLD}, #ffe2b0 45%, ${TEAL})` }}
-                    >
-                      {w}.
-                    </span>
-                  ))}
-                  <span className="invisible">yourself.</span>
+              <h1 className="mt-6 text-[clamp(2.8rem,6.6vw,6rem)] leading-[0.92] font-bold" style={{ fontFamily: "var(--font-display)" }}>
+                Sing it your way.<br />
+                <span className="text-white/90">Hear it </span>
+                <span
+                  className="font-accent bg-clip-text text-transparent pr-2"
+                  style={{ backgroundImage: `linear-gradient(100deg, ${GOLD}, #ffe2b0 45%, ${TEAL})` }}
+                >
+                  perfected.
                 </span>
               </h1>
             </Reveal>
@@ -263,6 +250,11 @@ export default function LandingPage({ onLaunchStudio }) {
               <p className="mx-auto lg:mx-0 mt-6 max-w-xl text-base sm:text-lg text-white/65 leading-relaxed">
                 Lyra fixes your pitch and timing against the original song, then sings it back in your own voice —
                 or as a legend. Studio stems and MIDI included.
+              </p>
+              <p className="mx-auto lg:mx-0 mt-4 max-w-xl flex flex-wrap justify-center lg:justify-start gap-2 text-[11px] font-mono text-white/55">
+                <span className="rounded-full border border-[#3fe0c5]/30 bg-[#3fe0c5]/[0.06] px-3 py-1 text-[#3fe0c5]">Seed-VC singing · 44.1 kHz</span>
+                <span className="rounded-full border border-[#e5a958]/30 bg-[#e5a958]/[0.06] px-3 py-1 text-[#e5a958]">RVC v2 · 48 kHz</span>
+                <span className="rounded-full border border-white/15 px-3 py-1">best engine picked per voice</span>
               </p>
             </Reveal>
             <Reveal delay={360}>
@@ -319,7 +311,7 @@ export default function LandingPage({ onLaunchStudio }) {
         <div className="max-w-6xl mx-auto">
           <Reveal>
             <p className="text-xs tracking-[0.3em] uppercase" style={{ color: TEAL }}>Play with it</p>
-            <h2 className="mt-3 text-4xl sm:text-5xl font-bold tracking-tight max-w-3xl" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+            <h2 className="mt-3 text-4xl sm:text-5xl font-bold tracking-tight max-w-3xl" style={{ fontFamily: "var(--font-display)" }}>
               Drag the sliders. Watch a shaky take become a melody.
             </h2>
           </Reveal>
@@ -336,7 +328,7 @@ export default function LandingPage({ onLaunchStudio }) {
           <div>
             <Reveal>
               <p className="text-xs tracking-[0.3em] uppercase" style={{ color: GOLD }}>My Voice mode</p>
-              <h2 className="mt-3 text-4xl sm:text-5xl font-bold tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+              <h2 className="mt-3 text-4xl sm:text-5xl font-bold tracking-tight" style={{ fontFamily: "var(--font-display)" }}>
                 For people who love singing more than they're good at it.
               </h2>
             </Reveal>
@@ -388,7 +380,7 @@ export default function LandingPage({ onLaunchStudio }) {
         <div className="max-w-6xl mx-auto">
           <Reveal>
             <p className="text-xs tracking-[0.3em] uppercase" style={{ color: TEAL }}>How it works</p>
-            <h2 className="mt-3 text-4xl sm:text-5xl font-bold tracking-tight max-w-3xl" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+            <h2 className="mt-3 text-4xl sm:text-5xl font-bold tracking-tight max-w-3xl" style={{ fontFamily: "var(--font-display)" }}>
               Five stages. One render. No robotic autotune passes.
             </h2>
           </Reveal>
@@ -420,7 +412,7 @@ export default function LandingPage({ onLaunchStudio }) {
         <div className="max-w-6xl mx-auto">
           <Reveal>
             <p className="text-xs tracking-[0.3em] uppercase" style={{ color: GOLD }}>Voices</p>
-            <h2 className="mt-3 text-4xl sm:text-5xl font-bold tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+            <h2 className="mt-3 text-4xl sm:text-5xl font-bold tracking-tight" style={{ fontFamily: "var(--font-display)" }}>
               Three legends. And you.
             </h2>
           </Reveal>
@@ -432,7 +424,7 @@ export default function LandingPage({ onLaunchStudio }) {
                   <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent pointer-events-none" />
                   <div className="relative h-full p-6 flex flex-col">
                     <div className="mt-auto">
-                      <h3 className="text-2xl font-bold" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{v.name}</h3>
+                      <h3 className="text-2xl font-bold" style={{ fontFamily: "var(--font-display)" }}>{v.name}</h3>
                       <p className="text-sm mt-1" style={{ color: v.color }}>{v.tag}</p>
                       <p className="text-sm text-white/55 mt-3 min-h-[2.5rem]">{v.style}</p>
                       <span className="mt-5 inline-flex items-center gap-1.5 text-sm text-white/80 group-hover:gap-3 transition-all">Use this voice <ArrowRight className="w-4 h-4" /></span>
@@ -450,7 +442,7 @@ export default function LandingPage({ onLaunchStudio }) {
                     <Users className="w-6 h-6" style={{ color: GOLD }} />
                   </div>
                   <div className="mt-auto">
-                    <h3 className="text-2xl font-bold" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Your Voice</h3>
+                    <h3 className="text-2xl font-bold" style={{ fontFamily: "var(--font-display)" }}>Your Voice</h3>
                     <p className="text-sm mt-1" style={{ color: GOLD }}>Personal model • trained on you</p>
                     <p className="text-sm text-white/55 mt-3">Record 10–20 minutes in the Voice Lab. Lyra fine-tunes a model that sings as you — in tune.</p>
                     <span className="mt-5 inline-flex items-center gap-1.5 text-sm text-white/80 group-hover:gap-3 transition-all">Open Voice Lab <ArrowRight className="w-4 h-4" /></span>
@@ -469,7 +461,7 @@ export default function LandingPage({ onLaunchStudio }) {
         <div className="relative max-w-6xl mx-auto">
           <Reveal>
             <p className="text-xs tracking-[0.3em] uppercase" style={{ color: TEAL }}>For composers & musicians</p>
-            <h2 className="mt-3 text-4xl sm:text-5xl font-bold tracking-tight max-w-3xl" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+            <h2 className="mt-3 text-4xl sm:text-5xl font-bold tracking-tight max-w-3xl" style={{ fontFamily: "var(--font-display)" }}>
               Demo a song in any voice. Drop it straight into your DAW.
             </h2>
           </Reveal>
@@ -480,7 +472,7 @@ export default function LandingPage({ onLaunchStudio }) {
               [Gauge, 'Key & BPM', 'Detected from the backing track and used to tune notes in key.'],
               [Wand2, 'Harmony in key', 'A diatonic third or fifth sung by the same voice, mixed beside the lead.'],
               [SlidersHorizontal, 'Section re-render', 'Re-sing only bars that need it with new pitch or correction settings.'],
-              [Sparkles, 'Measured quality', 'A benchmark tool scores pitch accuracy, speaker similarity and intelligibility.'],
+              [Sparkles, 'Measured, not guessed', 'A benchmark scores both engines on likeness, pitch and lyric clarity, and picks the winner per voice.'],
             ].map(([Icon, t, b], i) => (
               <Reveal key={t} delay={i * 80}>
                 <div className="h-full rounded-2xl border border-white/10 bg-black/40 backdrop-blur p-6 hover:border-[#3fe0c5]/40 hover:bg-black/60 transition group">
@@ -498,7 +490,7 @@ export default function LandingPage({ onLaunchStudio }) {
       <section id="faq" className="relative py-24 sm:py-32 px-4 sm:px-6">
         <div className="max-w-3xl mx-auto">
           <Reveal>
-            <h2 className="text-4xl sm:text-5xl font-bold tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Questions</h2>
+            <h2 className="text-4xl sm:text-5xl font-bold tracking-tight" style={{ fontFamily: "var(--font-display)" }}>Questions</h2>
           </Reveal>
           <div className="mt-10 divide-y divide-white/10 border-y border-white/10">
             {FAQ.map(([q, a], i) => (
@@ -522,7 +514,7 @@ export default function LandingPage({ onLaunchStudio }) {
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(7,8,10,0.55),#07080a_70%)]" />
         <Reveal className="relative max-w-3xl mx-auto text-center">
           <div className="flex justify-center"><LyraLogo /></div>
-          <h2 className="mt-6 text-4xl sm:text-6xl font-bold tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Your song is waiting.</h2>
+          <h2 className="mt-6 text-4xl sm:text-6xl font-bold tracking-tight" style={{ fontFamily: "var(--font-display)" }}>Your song is waiting.</h2>
           <p className="mt-5 text-white/70 text-lg">Upload a take, paste a link, or hit record.</p>
           <button type="button" onClick={() => launch(undefined, { mode: 'my_voice' })} className="shine-btn group mt-10 inline-flex items-center gap-2 rounded-full bg-[#e5a958] text-black font-semibold px-8 py-4 cursor-pointer">
             Open the studio <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
