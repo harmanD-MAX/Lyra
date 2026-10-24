@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --font-display: 'Bricolage Grotesque', 'Inter', -apple-system, sans-serif;
+  --font-display: 'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif;
   --font-serif: 'Instrument Serif', Georgia, serif;
   --font-body: 'Inter', -apple-system, sans-serif;
   --color-chatgpt-bg: #07080a;
@@ -36,8 +36,7 @@ body {
 [style*="Syne"],
 [style*="--font-display"] {
   font-family: var(--font-display);
-  font-variation-settings: 'opsz' 96;
-  letter-spacing: -0.035em;
+  letter-spacing: -0.025em;
 }
 
 /* Accent words in headlines: elegant italic serif */
@@ -50,8 +49,8 @@ body {
 
 .hero-headline {
   font-weight: 800 !important;
-  -webkit-text-stroke: 0.8px currentColor;
-  text-shadow: 0 4px 30px rgba(0, 0, 0, 0.85), 0 2px 8px rgba(0, 0, 0, 0.95);
+  letter-spacing: -0.03em;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.7);
 }
 
 .hero-subtext {
