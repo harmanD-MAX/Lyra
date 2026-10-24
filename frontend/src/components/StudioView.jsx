@@ -298,18 +298,11 @@ export default function StudioView({
     currentJob?.results?.saved_to_cloud
   );
 
-  const hasLocalStems = Boolean(
-    currentResults?.vocals_original ||
-    currentResults?.instrumental ||
-    currentResults?.vocals_arijit ||
-    currentResults?.vocals_converted ||
-    currentResults?.stems ||
-    (currentJob?.id && !currentResults?.cloud_only)
-  );
+  // If saved in Cloudflare R2, only the Master 3D version was stored in cloud storage.
+  // When a user opens songs fetched from Cloudflare (in My Songs or on return), it ONLY shows Master 3D.
+  // In the active Studio session before saving, all 4 stems (Master 3D, Solo, Instrumental, Original) are available.
+  const isCloudOnly = isCloudSaved;
 
-  const isCloudOnly = Boolean(isCloudSaved && !hasLocalStems);
-
-  // Stems are available for playback and isolation unless it is strictly an archived remote cloud-only entry
   const availableStems = useMemo(() => {
     if (isCloudOnly) {
       return STEMS.filter((s) => s.id === 'master');
@@ -502,8 +495,8 @@ export default function StudioView({
     setActiveTab('studio');
   };
 
-  // Full-song in-memory preloading states
-  const [blobAudioUrl, setBlobAudioUrl] = useState('');
+  // Full-song in-memory preloading: downloads all available stems into RAM Blobs for 0ms instant playback and seeking
+  const [stemBlobUrls, setStemBlobUrls] = useState({});
   const [isFullyLoaded, setIsFullyLoaded] = useState(false);
 
   // Determine stem audio source URL
@@ -536,50 +529,68 @@ export default function StudioView({
 
   // Decoded samples of the master track for the live spectrum ring visualizer (cached once per song)
   const [decodedEntry, setDecodedEntry] = useState(null);
-  const masterAudioSrc = currentJob?.id && currentResults ? getStemSource('master') : '';
+  const masterAudioSrc = currentJob?.id && currentResults ? (stemBlobUrls['master'] || getStemSource('master')) : '';
 
-  // Full-song in-memory preloader: downloads the entire audio into RAM so playback never stops and seeking is 0ms instant
+  // Concurrently pre-buffer all available stems (Master 3D, Solo vocal, Instrumental, Original) into RAM Blobs
   useEffect(() => {
-    if (!masterAudioSrc) {
-      setBlobAudioUrl('');
+    if (!currentJob?.id || !currentResults) {
+      setStemBlobUrls((prev) => {
+        Object.values(prev).forEach((u) => { try { URL.revokeObjectURL(u); } catch (e) {} });
+        return {};
+      });
       setIsFullyLoaded(false);
       return undefined;
     }
+
     let cancelled = false;
-    setIsFullyLoaded(false);
+    const stemsToLoad = availableStems.map((s) => s.id);
+    let loadedCount = 0;
 
-    // Fetch the entire audio into memory Blob
-    fetch(masterAudioSrc)
-      .then((r) => {
-        if (!r.ok) throw new Error("Fetch failed");
-        return r.blob();
-      })
-      .then((blob) => {
-        if (cancelled) return;
-        const blobUrl = URL.createObjectURL(blob);
-        setBlobAudioUrl(blobUrl);
-        setIsFullyLoaded(true);
+    stemsToLoad.forEach((stemKey) => {
+      const srcUrl = getStemSource(stemKey);
+      if (!srcUrl) return;
 
-        // Seamlessly transfer audio element to local in-memory blob without resetting playhead
-        const el = stemAudiosRef.current['master'];
-        if (el) {
-          const wasPlay = !el.paused && !el.ended;
-          const curTime = el.currentTime || 0;
-          el.src = blobUrl;
-          try { el.currentTime = curTime; } catch (e) {}
-          if (wasPlay) {
-            el.play().catch(() => {});
+      fetch(srcUrl)
+        .then((r) => {
+          if (!r.ok) throw new Error(`Fetch ${stemKey} failed: ${r.status}`);
+          return r.blob();
+        })
+        .then((blob) => {
+          if (cancelled) return;
+          const blobUrl = URL.createObjectURL(blob);
+          setStemBlobUrls((prev) => {
+            if (prev[stemKey]) {
+              try { URL.revokeObjectURL(prev[stemKey]); } catch (e) {}
+            }
+            return { ...prev, [stemKey]: blobUrl };
+          });
+
+          // Seamlessly update active HTML5 audio element to local in-memory blob without resetting playhead
+          const el = stemAudiosRef.current[stemKey];
+          if (el) {
+            const wasPlay = !el.paused && !el.ended;
+            const curTime = el.currentTime || 0;
+            el.src = blobUrl;
+            try { el.currentTime = curTime; } catch (e) {}
+            if (wasPlay) {
+              el.play().catch(() => {});
+            }
           }
-        }
-      })
-      .catch((err) => {
-        console.warn("Could not pre-buffer full song into blob:", err);
-      });
+
+          loadedCount += 1;
+          if (loadedCount >= stemsToLoad.length && !cancelled) {
+            setIsFullyLoaded(true);
+          }
+        })
+        .catch((err) => {
+          console.warn(`Could not pre-buffer stem ${stemKey} into blob:`, err);
+        });
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [masterAudioSrc]);
+  }, [currentJob?.id, currentResults, cacheBuster, isCloudOnly]);
 
   useEffect(() => {
     if (!masterAudioSrc) return undefined;
@@ -1082,7 +1093,7 @@ export default function StudioView({
             stemAudiosRef.current[stemKey] = el;
             if (stemKey === activeTrack) audioRef.current = el;
           }}
-          src={stemKey === 'master' && blobAudioUrl ? blobAudioUrl : (currentJob?.id && currentResults ? getStemSource(stemKey) : undefined)}
+          src={stemBlobUrls[stemKey] || (currentJob?.id && currentResults ? getStemSource(stemKey) : undefined)}
           preload="auto"
           onTimeUpdate={stemKey === activeTrack ? handleTimeUpdate : undefined}
           onLoadedMetadata={stemKey === activeTrack ? handleTimeUpdate : undefined}
@@ -1336,8 +1347,7 @@ export default function StudioView({
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setActiveJobId(j.id);
-                                setActiveTab('studio');
+                                requestSwitchJob(j.id);
                               }}
                               className="btn btn-secondary btn-sm"
                             >
