@@ -214,8 +214,8 @@ const RIBBON = [
   [Mic2, 'Seed-VC & RVC v2', TEAL],
   [Wand2, 'Harmony in key', GOLD],
   [SlidersHorizontal, 'Acoustic rack', TEAL],
-  [FileMusic, 'MIDI export', GOLD],
-  [Download, '24-bit stems', TEAL],
+  [Download, 'HD Master export', GOLD],
+  [Layers, 'Vocal & music stems', TEAL],
 ];
 
 function FeatureRibbon() {
@@ -393,7 +393,7 @@ const GUIDE = [
   },
   {
     art: 'export', title: 'Export & keep',
-    body: 'Download WAV or MP3, grab stems and MIDI, re-render a section, or save the master to the cloud. Find it later in My Songs.',
+    body: 'Listen in the studio player, download your high-definition MP3 master, or grab isolated vocal and backing tracks. Stored directly in My Songs.',
     where: 'Player → export bar',
   },
 ];
@@ -496,15 +496,15 @@ const PIPELINE = [
   { icon: Waves, title: 'Clean', body: 'De-reverb strips room tails so the voice model hears only the voice.', glyph: 'clean' },
   { icon: Music4, title: 'Melody engine', body: 'Key detection, note-level tuning, guide-melody & timing alignment — on the pitch curve.', glyph: 'melody' },
   { icon: Mic2, title: 'Render', body: 'Seed-VC singing diffusion or RVC v2 48 kHz — whichever scores best for that voice.', glyph: 'render' },
-  { icon: Layers, title: 'Mix & export', body: 'Master, 24-bit stems, MIDI melody, key & BPM — ready for your DAW.', glyph: 'export' },
+  { icon: Layers, title: 'Master & export', body: 'Studio-mastered 320 kbps MP3, isolated AI lead vocals, and clean backing music.', glyph: 'export' },
 ];
 
 const FAQ = [
   ['I can\'t sing. Will this actually help?', 'Yes — that\'s what Vocal Take mode is for. Record or upload your take; Lyra moves your notes onto the scale, steadies wobble and lets you compare the fixed version against your raw take before rendering. Then keep your own voice, in tune, or hand it to a singer model.'],
   ['How do I turn pitch correction off?', 'Use the Fix Pitch switch next to the engine picker. On, your melody is locked to the detected key; off, your microtonal phrasing is kept as sung. In Vocal Take you can also flip between Fixed Notes and Raw while previewing.'],
   ['Which engine should I pick?', 'RVC v2 for the tightest pitch, belting and fast renders. Seed-VC for the clearest lyrics and the closest likeness on soft, emotional songs. Both work with every singer, so try the same song with each.'],
-  ['What do I get after a render?', 'A Master 3D mix and a Clean Natural mix, the solo converted vocal, the instrumental and your original vocal — all switchable in the player without losing your place. Stems · MIDI · Re-render gives you 24-bit stems, a MIDI file, key and BPM, and section re-renders.'],
-  ['Where are my songs kept?', 'Every render appears in My Songs in the studio sidebar. Save to Cloud keeps a copy of the Master 3D mix; Free up space removes temporary files but keeps your masters, stems and MIDI.'],
+  ['What do I get after a render?', 'A studio-mastered cover, the solo AI converted vocals, and the instrumental backing track. You can balance vocals and music in the player and download the complete cover or stems.'],
+  ['Where are my songs kept?', 'Every created song appears in My Songs in the sidebar, and can be synced directly to your Google Drive so your creations are saved permanently.'],
   ['Which hardware do I need?', 'Apple Silicon Macs run natively on Metal; NVIDIA GPUs run with CUDA. Everything also runs on CPU, just slower. Lite mode kicks in automatically on smaller machines.'],
   ['Is it OK to use famous voices?', 'Lyra is a personal, for-fun project. Voice likeness is protected in many places, so keep celebrity-voice renders private and don\'t publish or monetise them. Your own voice is always yours to use.'],
 ];
@@ -544,7 +544,7 @@ export default function LandingPage({ onLaunchStudio }) {
 
             <Reveal delay={200}>
               <p className="mx-auto lg:mx-0 mt-6 max-w-xl text-base sm:text-lg text-white/60 leading-relaxed">
-                Lyra tunes your take, then sings it back in your own voice — or as Arijit Singh, Sonu Nigam or KK. Stems, key, BPM and MIDI included.
+                Lyra tunes your take, then sings it back in your own voice — or as Arijit Singh, Sonu Nigam or KK in studio-mastered audio.
               </p>
             </Reveal>
 
@@ -729,11 +729,11 @@ export default function LandingPage({ onLaunchStudio }) {
           </Reveal>
           <div className="mt-14 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
-              [Download, '24-bit dry stems', 'Converted lead, harmony, original backing vocals and instrumental — sample-aligned, no forced reverb.'],
-              [FileMusic, 'MIDI melody', 'The final sung melody as a .mid file, with the detected tempo.'],
+              [Download, 'Isolated stems', 'Sample-aligned converted lead vocals and clean instrumental backing track.'],
+              [Music4, 'Sur Lock pitch tuning', 'Visual melody tracking and automatic musical scale correction.'],
               [Gauge, 'Key & BPM', 'Detected from the backing track and used to tune notes in key.'],
               [Wand2, 'Harmony in key', 'A diatonic third or fifth sung by the same voice, mixed beside the lead.'],
-              [SlidersHorizontal, 'Section re-render', 'Re-sing only bars that need it with new pitch or correction settings.'],
+              [SlidersHorizontal, 'Real-time stem mixer', 'Balance lead vocals and backing track directly in the player.'],
               [Sparkles, 'Measured, not guessed', 'A benchmark scores both engines on likeness, pitch and lyric clarity, and picks the winner per voice.'],
             ].map(([Icon, t, b], i) => (
               <Reveal key={t} delay={i * 80}>
