@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 import ProcessingStatus from './ProcessingStatus';
 import ComposerTools from './ComposerTools';
-import VoiceLab from './VoiceLab';
 
 export default function StudioView({
   selectedModel,
@@ -38,7 +37,6 @@ export default function StudioView({
   personalVoices = [],
   creativeSummaryText = '',
   onOpenCreative,
-  onOpenVoiceLab
 }) {
   const [showComposerTools, setShowComposerTools] = useState(false);
   const [storage, setStorage] = useState(null);
@@ -62,6 +60,10 @@ export default function StudioView({
   const [ingestMethod, setIngestMethod] = useState('file');
   // High-level distinct song creation option: 'cover' (Neural AI Cover) | 'sang_by_me' (I Sang / Vocal Take)
   const [creationCategory, setCreationCategory] = useState(mode === 'record' || mode === 'my_voice' ? 'sang_by_me' : 'cover');
+  // Chosen neural engine for conversion: 'rvc' | 'seedvc'
+  const [selectedEngine, setSelectedEngine] = useState('rvc');
+  // Auto-tune & Fix Pitch toggle checkbox for recorded/uploaded audio
+  const [fixPitch, setFixPitch] = useState(true);
 
   // Active playing audio track: 'master' | 'vocal_arijit' | 'instrumental' | 'vocal_original'
   const [activeTrack, setActiveTrack] = useState('master');
@@ -748,7 +750,7 @@ export default function StudioView({
     else if (ingestMethod === 'youtube') setMode('youtube');
     else if (ingestMethod === 'record') setMode('record');
 
-    onStartConversion(ingestMethod);
+    onStartConversion(ingestMethod, { engine: selectedEngine, fixPitch });
   };
 
   // Check if current input method has a valid song selected
@@ -893,28 +895,13 @@ export default function StudioView({
                 </span>
               )}
             </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('voicelab')}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-all cursor-pointer ${activeTab === 'voicelab'
-                  ? 'bg-[#e5a958]/15 text-[#e5a958] font-semibold border border-[#e5a958]/30 shadow-sm'
-                  : 'hover:bg-white/5 hover:text-white'
-                }`}
-            >
-              <div className="flex items-center gap-3">
-                <Sparkles className="w-4 h-4 text-[#e5a958]" />
-                <span>Voice Training Lab</span>
-              </div>
-              <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-[#e5a958]/10 text-[#e5a958]">Full Page</span>
-            </button>
           </nav>
 
           {/* Vocalist Personas Switcher */}
           <div className="pt-4 border-t border-white/5 space-y-2">
             <div className="text-[10px] uppercase font-bold tracking-wider text-white/40 px-2 flex items-center justify-between">
               <span>Vocalist Persona</span>
-              <span className="text-[#3fe0c5] font-mono">Seed-VC · RVC</span>
+              <span className="text-[#3fe0c5] font-mono">{selectedEngine.toUpperCase()} · Metal</span>
             </div>
 
             <div className="space-y-1.5">
@@ -922,7 +909,6 @@ export default function StudioView({
                 { id: 'arijit_singh', name: 'Arijit Singh', vibe: 'Soulful Ballad & Warmth' },
                 { id: 'sonu_nigam', name: 'Sonu Nigam', vibe: 'Classical Range & Laser Pitch' },
                 { id: 'kk', name: 'KK', vibe: 'Raw Rock Tenor & Power' },
-                ...personalVoices.filter((v) => v.is_ready).map((v) => ({ id: v.id, name: v.name, vibe: 'Your personal voice model' })),
               ].map(model => (
                 <button
                   key={model.id}
@@ -942,14 +928,6 @@ export default function StudioView({
                   <div className="text-[10px] text-white/50 truncate mt-0.5">{model.vibe}</div>
                 </button>
               ))}
-              <button
-                type="button"
-                onClick={() => setActiveTab('voicelab')}
-                className="w-full text-left p-2.5 rounded-xl border border-dashed border-[#e5a958]/40 text-xs text-[#e5a958] hover:bg-[#e5a958]/10 transition-all cursor-pointer flex items-center justify-between"
-              >
-                <span>+ Train Voice (Full Page)</span>
-                <span className="text-[10px] font-mono">Open Lab →</span>
-              </button>
             </div>
           </div>
 
@@ -1171,20 +1149,7 @@ export default function StudioView({
             </div>
           )}
 
-          {/* =====================================================================
-              TAB: VOICE TRAINING LAB (Dedicated Full-Page View)
-             ===================================================================== */}
-          {activeTab === 'voicelab' && (
-            <div className="max-w-6xl w-full mx-auto px-2 sm:px-4 animate-fadeIn">
-              <VoiceLab
-                embedded={true}
-                open={true}
-                onClose={() => setActiveTab('studio')}
-                voices={personalVoices}
-                onVoicesChanged={onOpenVoiceLab}
-              />
-            </div>
-          )}
+
 
           {/* =====================================================================
               TAB: STUDIO WORKSPACE (Expansive Professional Studio Console)
@@ -1806,79 +1771,138 @@ export default function StudioView({
                     })}
                   </div>
 
-                  {/* Distinct Model Selector: Existing AI Legends vs Created by You */}
-                  <div className="p-3 rounded-2xl bg-white/[0.02] border border-white/5 mb-3 flex-shrink-0 space-y-2">
-                    <div className="flex items-center justify-between text-[11px] font-mono text-white/50">
-                      <span>CHOOSE SINGER FOR THIS TRACK</span>
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('voicelab')}
-                        className="text-[#e5a958] hover:underline cursor-pointer flex items-center gap-1"
-                      >
-                        + Train New Voice in Voice Lab →
-                      </button>
+                  {/* SINGER & CONVERSION ENGINE SUITE */}
+                  <div className="p-4 sm:p-5 rounded-2xl bg-white/[0.025] border border-white/10 mb-4 space-y-4">
+                    {/* 1. Singer Persona Choice */}
+                    <div>
+                      <div className="flex items-center justify-between text-xs font-mono text-white/50 mb-2">
+                        <span className="uppercase tracking-wider font-semibold">1. SELECT SINGER PERSONA</span>
+                        <span className="text-[#3fe0c5]">Arijit • Sonu • KK (RVC & Seed-VC Ready)</span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {creationCategory === 'sang_by_me' && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedModel('raw')}
+                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                              selectedModel === 'raw'
+                                ? 'bg-[#e5a958]/20 border-[#e5a958] text-white shadow-md ring-1 ring-[#e5a958]'
+                                : 'bg-white/[0.02] border-white/10 text-white/70 hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-xs sm:text-sm">Keep My Voice</span>
+                              {selectedModel === 'raw' && <Check className="w-3.5 h-3.5 text-[#e5a958]" />}
+                            </div>
+                            <span className="text-[10px] text-white/50 mt-1">In Tune • No Timbre Change</span>
+                          </button>
+                        )}
+
+                        {[
+                          { id: 'arijit_singh', name: 'Arijit Singh', vibe: 'Soulful & Warmth' },
+                          { id: 'sonu_nigam', name: 'Sonu Nigam', vibe: 'Classical & High Sur' },
+                          { id: 'kk', name: 'KK', vibe: 'Raw Rock & Power' },
+                        ].map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => setSelectedModel(s.id)}
+                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                              selectedModel === s.id
+                                ? 'bg-[#e5a958]/20 border-[#e5a958] text-white shadow-md ring-1 ring-[#e5a958]'
+                                : 'bg-white/[0.02] border-white/10 text-white/70 hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-xs sm:text-sm">{s.name}</span>
+                              {selectedModel === s.id && <Check className="w-3.5 h-3.5 text-[#e5a958]" />}
+                            </div>
+                            <span className="text-[10px] text-white/50 mt-1">{s.vibe}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      {creationCategory === 'sang_by_me' && (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedModel('raw')}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer flex items-center gap-1.5 ${
-                            selectedModel === 'raw'
-                              ? 'bg-[#e5a958] text-black border-[#e5a958] shadow-sm'
-                              : 'bg-white/5 border-white/10 text-white/70 hover:text-white'
-                          }`}
-                        >
-                          <Mic className="w-3.5 h-3.5" />
-                          <span>Keep My Own Voice (In Tune)</span>
-                        </button>
-                      )}
+                    {/* 2. Choose Model Engine: RVC v2 vs Seed-VC */}
+                    {selectedModel !== 'raw' && (
+                      <div className="pt-3 border-t border-white/5">
+                        <div className="flex items-center justify-between text-xs font-mono text-white/50 mb-2">
+                          <span className="uppercase tracking-wider font-semibold">2. CHOOSE CONVERSION ENGINE</span>
+                          <span className="text-[#e5a958]">Select model for {singerName}</span>
+                        </div>
 
-                      {/* Group 1: AI Legends */}
-                      <span className="text-[10px] font-mono uppercase text-white/40 px-1">AI Legends:</span>
-                      {[
-                        { id: 'arijit_singh', name: 'Arijit Singh' },
-                        { id: 'sonu_nigam', name: 'Sonu Nigam' },
-                        { id: 'kk', name: 'KK' },
-                      ].map(model => (
-                        <button
-                          key={model.id}
-                          type="button"
-                          onClick={() => setSelectedModel(model.id)}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition cursor-pointer flex items-center gap-1.5 ${
-                            selectedModel === model.id
-                              ? 'bg-[#e5a958]/20 border-[#e5a958] text-[#e5a958] font-bold shadow-sm'
-                              : 'bg-white/5 border-white/10 text-white/70 hover:text-white'
-                          }`}
-                        >
-                          <span>{model.name}</span>
-                          {selectedModel === model.id && <Check className="w-3 h-3 text-[#e5a958]" />}
-                        </button>
-                      ))}
+                        <div className="grid sm:grid-cols-2 gap-2.5">
+                          {/* Option 1: RVC v2 */}
+                          <button
+                            type="button"
+                            onClick={() => setSelectedEngine('rvc')}
+                            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                              selectedEngine === 'rvc'
+                                ? 'bg-gradient-to-r from-[#e5a958]/20 to-transparent border-[#e5a958] text-white shadow-md ring-1 ring-[#e5a958]'
+                                : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-sm text-white">⚡ RVC v2</span>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#e5a958]/15 text-[#e5a958] border border-[#e5a958]/30">48 kHz Metal</span>
+                              </div>
+                              {selectedEngine === 'rvc' && <Check className="w-4 h-4 text-[#e5a958]" />}
+                            </div>
+                            <p className="text-[11px] text-white/60 mt-1.5 leading-relaxed">
+                              Rock-solid pitch lock, iconic vibrato & high belt power. Best for classical runs, belting pop/rock, and energetic tracks.
+                            </p>
+                          </button>
 
-                      {/* Group 2: Created by You */}
-                      {personalVoices.filter(v => v.is_ready).length > 0 && (
-                        <>
-                          <span className="text-[10px] font-mono uppercase text-[#3fe0c5] px-1">Created By You:</span>
-                          {personalVoices.filter(v => v.is_ready).map(model => (
-                            <button
-                              key={model.id}
-                              type="button"
-                              onClick={() => setSelectedModel(model.id)}
-                              className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition cursor-pointer flex items-center gap-1.5 ${
-                                selectedModel === model.id
-                                  ? 'bg-[#3fe0c5]/20 border-[#3fe0c5] text-[#3fe0c5] font-bold shadow-sm'
-                                  : 'bg-white/5 border-white/10 text-white/70 hover:text-white'
-                              }`}
-                            >
-                              <span>{model.name}</span>
-                              <span className="text-[9px] font-mono px-1 rounded bg-white/10">Custom</span>
-                              {selectedModel === model.id && <Check className="w-3 h-3 text-[#3fe0c5]" />}
-                            </button>
-                          ))}
-                        </>
-                      )}
+                          {/* Option 2: Seed-VC */}
+                          <button
+                            type="button"
+                            onClick={() => setSelectedEngine('seedvc')}
+                            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                              selectedEngine === 'seedvc'
+                                ? 'bg-gradient-to-r from-[#3fe0c5]/20 to-transparent border-[#3fe0c5] text-white shadow-md ring-1 ring-[#3fe0c5]'
+                                : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-sm text-white">🌱 Seed-VC Singing</span>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#3fe0c5]/15 text-[#3fe0c5] border border-[#3fe0c5]/30">44.1 kHz Hi-Fi DiT</span>
+                              </div>
+                              {selectedEngine === 'seedvc' && <Check className="w-4 h-4 text-[#3fe0c5]" />}
+                            </div>
+                            <p className="text-[11px] text-white/60 mt-1.5 leading-relaxed">
+                              Diffusion Transformer with Whisper phonemes. Crystal lyric intelligibility, breathless micro-dynamics, and delicate phrasing.
+                            </p>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3. Fix Pitch & Auto-Tune Checkbox */}
+                    <div className="pt-3 border-t border-white/5">
+                      <label className="flex items-start gap-3 p-3.5 rounded-xl bg-black/30 border border-white/10 hover:border-[#e5a958]/40 transition cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={fixPitch}
+                          onChange={(e) => setFixPitch(e.target.checked)}
+                          className="mt-0.5 w-4 h-4 rounded border-white/20 text-[#e5a958] focus:ring-[#e5a958] bg-black/60 cursor-pointer accent-[#e5a958]"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs sm:text-sm font-semibold text-white flex items-center gap-2">
+                            <span>Auto-Tune & Fix Pitch (Snap to Musical Key)</span>
+                            {fixPitch ? (
+                              <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">Pitch Lock Active</span>
+                            ) : (
+                              <span className="text-[10px] font-mono text-white/40 bg-white/5 px-2 py-0.5 rounded-full">Raw Pitch Kept</span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-white/50 mt-0.5 leading-relaxed">
+                            Automatically detects song key, steadies tremor/wobble, and moves notes onto the scale. Uncheck to preserve natural microtonal takes.
+                          </p>
+                        </div>
+                      </label>
                     </div>
                   </div>
 
@@ -2360,7 +2384,7 @@ export default function StudioView({
                       ) : (
                         <>
                           <Sparkles className="w-5 h-5" />
-                          <span>Transform Song with {singerName}</span>
+                          <span>Transform Song with {singerName} ({selectedEngine === 'seedvc' ? 'Seed-VC 44.1k' : 'RVC v2 48k'})</span>
                           <ArrowRight className="w-5 h-5" />
                         </>
                       )}
