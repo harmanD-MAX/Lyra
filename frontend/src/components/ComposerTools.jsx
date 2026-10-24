@@ -89,7 +89,7 @@ export default function ComposerTools({ open, onClose, job, onRerendered }) {
       <div className="w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-3xl border border-white/10 bg-[#111317] shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-white/10 bg-[#111317]/95 backdrop-blur">
           <div>
-            <h2 className="text-lg font-bold" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Composer tools</h2>
+            <h2 className="text-lg font-bold" style={{ fontFamily: "var(--font-display)" }}>Composer tools</h2>
             <p className="text-xs text-white/50">Stems, MIDI and section re-render for your DAW.</p>
           </div>
           <button type="button" onClick={onClose} className="p-2 rounded-full hover:bg-white/10 cursor-pointer" aria-label="Close"><X className="w-5 h-5" /></button>

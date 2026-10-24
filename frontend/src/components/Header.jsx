@@ -35,7 +35,7 @@ export default function Header({ currentView = 'landing', onViewChange }) {
           <LyraLogo />
           <span 
             className="text-xl font-bold uppercase tracking-[0.2em] text-white group-hover:text-[#e5a958] transition-colors"
-            style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+            style={{ fontFamily: "var(--font-display)" }}
           >
             Lyra
           </span>

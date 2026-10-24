@@ -2,9 +2,9 @@
 Lyra quality benchmark: measure conversions instead of judging by ear.
 
     python tools/benchmark.py --clips bench/clips --model arijit_singh \
-        --reference bench/arijit_refs --index-rates 0.2,0.4,0.6 --out bench/report.json
+        --reference bench/arijit_refs --engines rvc,seedvc --out bench/report.json
 
-For every clip x setting it renders the conversion and reports:
+For every clip x engine x setting it renders the conversion and reports:
 
     pitch_accuracy   % of voiced frames within 50 cents of the intended melody
     pitch_rmse_cents RMS pitch error vs the intended melody (cents)
@@ -14,8 +14,10 @@ For every clip x setting it renders the conversion and reports:
     wer              Whisper word error rate of output vs input transcript
                      (needs `openai-whisper`; Hindi works with --language hi)
 
-Pick per-singer defaults (index rate, protect) from the best average row,
-then confirm with a blind listening test.
+With more than one engine, the engine with the best combined score
+(speaker similarity 50%, pitch accuracy 25%, intelligibility 25%) is saved
+to models/engine_choice.json and becomes that voice's "auto" engine.
+Confirm with a blind listening test.
 """
 
 import argparse
@@ -99,6 +101,20 @@ class WerScorer:
         return round(d[-1, -1] / max(len(ref), 1), 3)
 
 
+def _score(avg: dict) -> float:
+    """Combined score in 0..1 from whichever metrics were measured."""
+    parts = []
+    if avg.get("speaker_sim") is not None:
+        parts.append((0.5, max(0.0, avg["speaker_sim"])))
+    if avg.get("pitch_accuracy") is not None:
+        parts.append((0.25, avg["pitch_accuracy"] / 100.0))
+    if avg.get("wer") is not None:
+        parts.append((0.25, max(0.0, 1.0 - avg["wer"])))
+    if not parts:
+        return 0.0
+    return sum(w * v for w, v in parts) / sum(w for w, _ in parts)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--clips", required=True, help="folder of dry vocal clips (.wav)")
@@ -108,14 +124,28 @@ def main():
     ap.add_argument("--protects", default="0.33", help="comma-separated protect values to sweep")
     ap.add_argument("--correction", type=float, default=0.0, help="pitch correction strength during the test")
     ap.add_argument("--language", default=None, help="Whisper language code, e.g. hi")
+    ap.add_argument("--engines", default="rvc", help="comma-separated: rvc, seedvc")
+    ap.add_argument("--no-save-choice", action="store_true", help="don't update models/engine_choice.json")
     ap.add_argument("--out", default="benchmark_report.json")
     args = ap.parse_args()
 
     import audio_processor
+    import engines
+    import voice_enhance
+    import soundfile as sf
 
+    model_info = audio_processor.resolve_model_info(args.model)
     clips = sorted(glob.glob(os.path.join(args.clips, "*.wav")))
     if not clips:
         sys.exit(f"No .wav clips in {args.clips}")
+    wanted = [e.strip() for e in args.engines.split(",") if e.strip()]
+    available = engines.engine_options(model_info)
+    run_engines = [e for e in wanted if available.get(e)]
+    for e in wanted:
+        if e not in run_engines:
+            print(f"[skip engine {e}] not available for {args.model} (install Seed-VC / add a reference clip)")
+    if not run_engines:
+        sys.exit("No requested engine is available.")
 
     spk = None
     if args.reference:
@@ -130,30 +160,44 @@ def main():
         print(f"[wer disabled] {e}")
 
     ref_texts = {c: wer.text(c) for c in clips} if wer else {}
+    # Intended melody = the source melody (no correction during the test)
+    src_f0 = {}
+    for c in clips:
+        y, sr = sf.read(c, always_2d=True)
+        src_f0[c] = voice_enhance.analyse_f0(y.mean(axis=1), sr)
+    src_fps = 1000.0 / voice_enhance.FRAME_PERIOD_MS
+
     rows = []
     work = tempfile.mkdtemp(prefix="lyra_bench_")
-    for ir in [float(x) for x in args.index_rates.split(",")]:
-        for pr in [float(x) for x in args.protects.split(",")]:
-            for clip in clips:
-                name = os.path.splitext(os.path.basename(clip))[0]
-                opts = {"mode": "scale", "strength": args.correction} if args.correction > 0 else None
-                r = audio_processor.convert_voice(
+    settings = []
+    for eng in run_engines:
+        if eng == "rvc":
+            settings += [("rvc", float(ir), float(pr)) for ir in args.index_rates.split(",") for pr in args.protects.split(",")]
+        else:
+            settings.append((eng, None, None))
+    for eng, ir, pr in settings:
+        for clip in clips:
+            name = os.path.splitext(os.path.basename(clip))[0]
+            out = os.path.join(work, f"{name}_{eng}_{ir}_{pr}.wav")
+            if eng == "seedvc":
+                engines.convert_seedvc(clip, model_info, out)
+            else:
+                audio_processor.convert_voice(
                     vocal_path=clip, output_dir=work, model_name=args.model, index_rate=ir, protect=pr,
-                    pitch_options=opts, output_name=f"{name}_ir{ir}_p{pr}.wav",
+                    output_name=os.path.basename(out),
                 )
-                row = {"clip": name, "index_rate": ir, "protect": pr, "engine": r["engine"]}
-                if r["f0"] is not None:
-                    row.update(pitch_metrics(r["f0"], r["fps"], r["path"]))
-                if spk:
-                    row["speaker_sim"] = spk.score(r["path"])
-                if wer:
-                    row["wer"] = wer.wer(ref_texts[clip], r["path"])
-                rows.append(row)
-                print(row)
+            row = {"clip": name, "engine": eng, "index_rate": ir, "protect": pr}
+            row.update(pitch_metrics(src_f0[clip], src_fps, out))
+            if spk:
+                row["speaker_sim"] = spk.score(out)
+            if wer:
+                row["wer"] = wer.wer(ref_texts[clip], out)
+            rows.append(row)
+            print(row)
 
     summary = {}
     for row in rows:
-        key = f"index_rate={row['index_rate']} protect={row['protect']}"
+        key = row["engine"] if row["engine"] != "rvc" else f"rvc index_rate={row['index_rate']} protect={row['protect']}"
         summary.setdefault(key, []).append(row)
     averages = {}
     for key, rs in summary.items():
@@ -162,9 +206,15 @@ def main():
             vals = [r[metric] for r in rs if r.get(metric) is not None]
             if vals:
                 avg[metric] = round(float(np.mean(vals)), 3)
+        avg["score"] = round(_score(avg), 4)
         averages[key] = avg
+    best_key = max(averages, key=lambda k: averages[k]["score"])
+    best_engine = "rvc" if best_key.startswith("rvc") else best_key
     with open(args.out, "w") as f:
-        json.dump({"model": args.model, "averages": averages, "rows": rows}, f, indent=2)
+        json.dump({"model": args.model, "averages": averages, "winner": best_key, "rows": rows}, f, indent=2)
+    if len(run_engines) > 1 and not args.no_save_choice:
+        engines.write_engine_choice(model_info["id"], best_engine, averages)
+        print(f"\nSaved: {args.model} will use '{best_engine}' when the engine is set to Auto.")
     print("\nAverages:")
     for key, avg in averages.items():
         print(f"  {key}: {avg}")

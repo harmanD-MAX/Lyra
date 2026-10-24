@@ -68,7 +68,7 @@ export default function VoiceOrb({ className = '', colorA = '#e5a958', colorB = 
     const mount = mountRef.current;
     if (!mount) return undefined;
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'low-power' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
@@ -86,7 +86,7 @@ export default function VoiceOrb({ className = '', colorA = '#e5a958', colorB = 
       uColorB: { value: new THREE.Color(colorB) },
     };
     const orb = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(1.35, 48),
+      new THREE.IcosahedronGeometry(1.35, 28),
       new THREE.ShaderMaterial({ uniforms, vertexShader: ORB_VERT, fragmentShader: ORB_FRAG, transparent: true, depthWrite: false }),
     );
     group.add(orb);
@@ -98,7 +98,7 @@ export default function VoiceOrb({ className = '', colorA = '#e5a958', colorB = 
     group.add(wire);
 
     // particle halo
-    const N = 1400;
+    const N = 900;
     const pos = new Float32Array(N * 3);
     for (let i = 0; i < N; i++) {
       const r = 2.1 + Math.random() * 1.4;
