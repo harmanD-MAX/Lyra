@@ -3,14 +3,16 @@ import time
 import json
 import shutil
 import threading
+import asyncio
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from dotenv import load_dotenv
 
 # Load environment variables from .env
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
-from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, HTTPException, Query, Request, Response
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -18,6 +20,9 @@ from fastapi.staticfiles import StaticFiles
 from jobs import job_manager
 import audio_processor
 import r2_storage
+import separation
+import studio_pipeline
+import voices
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
@@ -177,28 +182,12 @@ async def startup_scan_jobs():
     job_manager._save()
 
 
-def run_pipeline(
-    job_id: str,
-    source_type: str,
-    file_path: Optional[str],
-    youtube_url: Optional[str],
-    model_name: str,
-    pitch_shift: int,
-    f0_method: str,
-    index_rate: float,
-    protect: float,
-    vocal_gain_db: float = 0.0,
-    inst_gain_db: float = 0.0,
-    reverb_amount: float = 0.0,
-    echo_amount: float = 0.0,
-    warmth: float = 0.55,
-    clarity: float = 0.85,
-    has_music: bool = True,
-    apply_autotune: bool = True,
-    autotune_strength: float = 0.50,
-    style_strength: float = 1.0,
-    spotify_url: Optional[str] = None
-):
+# One GPU/CPU-heavy job at a time: separation, RVC and training all compete for
+# the same memory, so a single worker keeps runs fast and predictable.
+JOB_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lyra-job")
+
+
+def run_pipeline(job_id: str, params: "studio_pipeline.JobParams"):
     job_dir = os.path.join(OUTPUTS_DIR, job_id)
     os.makedirs(job_dir, exist_ok=True)
 
@@ -206,203 +195,86 @@ def run_pipeline(
         job_manager.update_job(job_id, progress=progress, message=message)
 
     try:
-        model_info = audio_processor.AVAILABLE_MODELS.get(model_name, audio_processor.AVAILABLE_MODELS["arijit_singh"])
-        singer_name = model_info["name"]
-
-        job_manager.update_job(job_id, status="processing", progress=5, message=f"Starting AI studio pipeline ({singer_name})...")
-        meta_info = {}
-
-        # 1. Ingest input audio
-        if source_type == "spotify" or (spotify_url and ("spotify.com" in spotify_url or spotify_url.startswith("spotify:"))):
-            target_url = spotify_url or youtube_url
-            progress_callback(8, f"Ingesting Spotify track from: {target_url[:40]}...")
-            spot_res = audio_processor.download_spotify_audio(target_url, job_dir, progress_cb=progress_callback)
-            input_audio_path = spot_res["audio_path"]
-            meta_info["title"] = spot_res["title"]
-            meta_info["thumbnail"] = spot_res["thumbnail"]
-            meta_info["duration"] = spot_res["duration"]
-            meta_info["uploader"] = spot_res["uploader"]
-        elif source_type == "youtube":
-            if youtube_url and ("spotify.com" in youtube_url or youtube_url.startswith("spotify:")):
-                progress_callback(8, f"Detected Spotify track from: {youtube_url[:40]}...")
-                spot_res = audio_processor.download_spotify_audio(youtube_url, job_dir, progress_cb=progress_callback)
-                input_audio_path = spot_res["audio_path"]
-                meta_info["title"] = spot_res["title"]
-                meta_info["thumbnail"] = spot_res["thumbnail"]
-                meta_info["duration"] = spot_res["duration"]
-                meta_info["uploader"] = spot_res["uploader"]
-            else:
-                progress_callback(8, f"Ingesting YouTube audio from: {youtube_url[:40]}...")
-                yt_res = audio_processor.download_youtube_audio(youtube_url, job_dir, progress_cb=progress_callback)
-                input_audio_path = yt_res["audio_path"]
-                meta_info["title"] = yt_res["title"]
-                meta_info["thumbnail"] = yt_res["thumbnail"]
-                meta_info["duration"] = yt_res["duration"]
-                meta_info["uploader"] = yt_res["uploader"]
-        else:
-            progress_callback(10, "Validating and preparing uploaded audio file...")
-            input_audio_path = os.path.join(job_dir, "input_audio.wav")
-            # Convert uploaded file to 44.1kHz standard WAV via ffmpeg safely using subprocess
-            import subprocess
-            try:
-                subprocess.run([
-                    "ffmpeg", "-y", "-i", file_path,
-                    "-ar", "44100", "-ac", "2",
-                    input_audio_path
-                ], capture_output=True, check=True)
-            except Exception as ffmpeg_err:
-                logger.error(f"FFmpeg conversion failed: {ffmpeg_err}")
-                raise RuntimeError(f"Failed to decode uploaded audio file with FFmpeg: {ffmpeg_err}")
-
-            if not os.path.exists(input_audio_path) or os.path.getsize(input_audio_path) < 100:
-                raise RuntimeError("Converted audio file is empty or missing.")
-
-            meta_info["title"] = os.path.basename(file_path) if file_path else "Uploaded Audio"
-            # Delete redundant file in uploads folder to save precious disk space
-            if file_path and os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                except Exception:
-                    pass
-
-        # 2. Separation with Demucs
-        if has_music:
-            progress_callback(28, "Separating audio into Vocal and Instrumental stems (Demucs)...")
-            stems = audio_processor.separate_stems_demucs(input_audio_path, job_dir, progress_cb=progress_callback)
-            isolated_vocal_path = stems["vocals_path"]
-            instrumental_path = stems["instrumental_path"]
-        else:
-            progress_callback(35, "Input marked as pure vocal track (skipping stem separation)...")
-            isolated_vocal_path = input_audio_path
-            instrumental_path = None
-
-        # 2.5 Pre-Conversion Note Correction (Sur Lock):
-        # Correct and snap notes to 100% musical perfection BEFORE voice conversion,
-        # so RVC converts in-tune, pitch-perfect notes!
-        if source_type == "file":
-            progress_callback(50, "Perfecting notes: locking vocal pitch to musical scale before neural conversion...")
-            pitch_perfect_vocal = os.path.join(job_dir, "vocal_pitch_perfect.wav")
-            try:
-                audio_processor.apply_ai_autotune(
-                    input_wav=isolated_vocal_path,
-                    output_wav=pitch_perfect_vocal,
-                    autotune_strength=1.0,
-                    retune_speed_ms=10.0,
-                    progress_cb=progress_callback
-                )
-                if os.path.exists(pitch_perfect_vocal) and os.path.getsize(pitch_perfect_vocal) > 1000:
-                    isolated_vocal_path = pitch_perfect_vocal
-            except Exception as e:
-                logger.warning(f"Pre-conversion note correction error: {e}")
-
-        # 3. Voice Conversion to Selected Singer (Arijit Singh or Sonu Nigam)
-        progress_callback(62, f"Converting vocal stem into {singer_name}'s voice (F0={f0_method}, pitch={pitch_shift:+d}, style={int(style_strength*100)}%)...")
-        converted_vocal_path = audio_processor.convert_voice(
-            vocal_path=isolated_vocal_path,
-            output_dir=job_dir,
-            model_name=model_name,
-            pitch_shift=pitch_shift,
-            f0_method=f0_method,
-            index_rate=index_rate,
-            protect=protect,
-            style_strength=style_strength,
-            progress_cb=progress_callback
-        )
-
-        # 4. Studio Remastering, AI Diction Enhancement & Acoustics
-        progress_callback(85, "Remastering audio: enhancing Hindi lyric diction, consonant clarity & studio limiter...")
-        master_res = audio_processor.master_and_remaster_track(
-            vocal_wav=converted_vocal_path,
-            inst_wav=instrumental_path,
-            output_dir=job_dir,
-            raw_vocal_wav=isolated_vocal_path,
-            vocal_gain_db=vocal_gain_db,
-            inst_gain_db=inst_gain_db,
-            reverb_amount=reverb_amount,
-            echo_amount=echo_amount,
-            warmth=warmth,
-            clarity=clarity,
-            apply_autotune=apply_autotune,
-            autotune_strength=autotune_strength,
-            progress_cb=progress_callback
-        )
+        job_manager.update_job(job_id, status="processing", progress=3, message="Job started...")
+        out = studio_pipeline.run(job_dir, params, progress_callback)
+        meta_info = out["meta"]
+        target_name = out["target_name"]
+        stem_urls = {name: f"/api/stems/{job_id}/{name}" for name in out["stems"]}
 
         results = {
-            "title": f"{meta_info.get('title', 'Song')} ({singer_name} Version)",
+            "title": f"{meta_info.get('title', 'Song')} ({target_name} Version)",
             "thumbnail": meta_info.get("thumbnail", ""),
             "duration": meta_info.get("duration", 0),
             "uploader": meta_info.get("uploader", ""),
-            "singer": singer_name,
-            "model_name": model_name,
+            "singer": target_name,
+            "model_name": params.model_name,
+            "mode": params.mode,
             "input_audio": f"/api/audio/{job_id}/input",
-            "vocals_original": f"/api/audio/{job_id}/vocal_original" if has_music else "",
-            "instrumental": f"/api/audio/{job_id}/instrumental" if instrumental_path else "",
+            "vocals_original": f"/api/audio/{job_id}/vocal_original",
+            "instrumental": f"/api/audio/{job_id}/instrumental" if out["stems"].get("accompaniment") or out["stems"].get("instrumental") else "",
             "vocals_arijit": f"/api/audio/{job_id}/vocal_arijit",
-            "vocals_converted": f"/api/audio/{job_id}/vocal_arijit",
+            "vocals_converted": f"/api/audio/{job_id}/vocal_converted",
             "master_remastered_wav": f"/api/audio/{job_id}/master_wav",
             "master_remastered_mp3": f"/api/audio/{job_id}/master_mp3",
             "master_clean_wav": f"/api/audio/{job_id}/master_clean_wav",
             "master_clean_mp3": f"/api/audio/{job_id}/master_clean_mp3",
-            "settings": {
-                "model_name": model_name,
-                "singer_name": singer_name,
-                "pitch_shift": pitch_shift,
-                "f0_method": f0_method,
-                "index_rate": index_rate,
-                "protect": protect,
-                "style_strength": style_strength,
-                "vocal_gain_db": vocal_gain_db,
-                "inst_gain_db": inst_gain_db,
-                "reverb_amount": reverb_amount,
-                "echo_amount": echo_amount,
-                "apply_autotune": apply_autotune,
-                "autotune_strength": autotune_strength
-            }
+            "stems": stem_urls,
+            "stems_zip": f"/api/stems/{job_id}/all.zip",
+            "midi": f"/api/midi/{job_id}" if out["midi"] else "",
+            "analysis": out["analysis"],
+            "engine": out["engine"],
+            "separation_engine": out["separation_engine"],
+            "settings": params.to_dict(),
         }
+        results["settings"]["singer_name"] = target_name
 
-        job_manager.update_job(
-            job_id,
-            status="completed",
-            progress=100,
-            message=f"{singer_name} conversion & studio polish finalized successfully!",
-            results=results
-        )
-
-        # Save meta.json in job directory to survive restarts
+        job_manager.update_job(job_id, status="completed", progress=100,
+                               message=f"{target_name} version finished!", results=results)
         try:
             with open(os.path.join(job_dir, "meta.json"), "w") as f:
                 json.dump({
                     "id": job_id,
                     "title": results["title"],
-                    "singer": singer_name,
-                    "model_name": model_name,
+                    "singer": target_name,
+                    "model_name": params.model_name,
                     "thumbnail": results["thumbnail"],
                     "duration": results["duration"],
                     "uploader": results["uploader"],
-                    "source_type": source_type,
+                    "source_type": params.source_type,
                     "results": results
                 }, f, indent=2)
         except Exception as err:
             print("Could not save job meta.json:", err)
-
     except BaseException as e:
-        err_msg = str(e)
-        logger_trace = traceback.format_exc()
-        print(f"Error in job {job_id}: {logger_trace}")
-        job_manager.update_job(job_id, status="error", error=err_msg)
+        print(f"Error in job {job_id}: {traceback.format_exc()}")
+        job_manager.update_job(job_id, status="error", error=str(e))
+
+
+def _save_upload(upload: UploadFile, prefix: str) -> str:
+    clean_base = os.path.basename(upload.filename or "audio").replace(" ", "_").replace("'", "").replace('"', "")
+    dest = os.path.join(UPLOADS_DIR, f"{prefix}_{clean_base}")
+    with open(dest, "wb") as buffer:
+        shutil.copyfileobj(upload.file, buffer)
+    return dest
+
+
+def _url_source(url: Optional[str]) -> Optional[str]:
+    if not url:
+        return None
+    return "spotify" if ("spotify.com" in url or url.startswith("spotify:")) else "youtube"
 
 
 @app.post("/api/convert")
 async def start_conversion(
-    background_tasks: BackgroundTasks,
     audio_file: Optional[UploadFile] = File(None),
     youtube_url: Optional[str] = Form(None),
     spotify_url: Optional[str] = Form(None),
+    mode: str = Form("convert"),
     model_name: str = Form("arijit_singh"),
     pitch_shift: int = Form(0),
     f0_method: str = Form("rmvpe"),
-    index_rate: float = Form(0.28),
-    protect: float = Form(0.05),
+    index_rate: Optional[float] = Form(None),
+    protect: float = Form(0.33),
     vocal_gain_db: float = Form(0.0),
     inst_gain_db: float = Form(0.0),
     reverb_amount: float = Form(0.0),
@@ -411,63 +283,273 @@ async def start_conversion(
     clarity: float = Form(0.85),
     has_music: bool = Form(True),
     apply_autotune: bool = Form(True),
-    autotune_strength: float = Form(0.50),
-    style_strength: float = Form(1.0)
+    autotune_strength: Optional[float] = Form(None),
+    style_strength: float = Form(1.0),
+    split_backing: bool = Form(True),
+    dereverb: bool = Form(True),
+    pitch_mode: str = Form("auto"),
+    key: str = Form("auto"),
+    retune_ms: float = Form(40.0),
+    steadiness: float = Form(0.5),
+    vibrato: float = Form(0.0),
+    harmony: str = Form("none"),
+    guide_file: Optional[UploadFile] = File(None),
+    guide_url: Optional[str] = Form(None),
+    align_timing: bool = Form(True),
 ):
-    # Auto-detect spotify URL passed in youtube_url field
-    if youtube_url and ("spotify.com" in youtube_url or youtube_url.startswith("spotify:")):
-        if not spotify_url:
-            spotify_url = youtube_url
-            youtube_url = None
-
-    if not audio_file and not youtube_url and not spotify_url:
+    url = spotify_url or youtube_url
+    if not audio_file and not url:
         raise HTTPException(status_code=400, detail="Please provide an audio file, YouTube URL, or Spotify URL.")
+    if mode not in ("convert", "my_voice"):
+        raise HTTPException(status_code=400, detail="mode must be 'convert' or 'my_voice'")
+    if model_name == "raw" and mode != "my_voice":
+        raise HTTPException(status_code=400, detail="'Keep my voice (raw)' is only available in My Voice mode.")
 
-    source_type = "file" if audio_file else ("spotify" if spotify_url else "youtube")
-    saved_file_path = None
-
+    source_type = "file" if audio_file else _url_source(url)
     job_id = job_manager.create_job(metadata={
         "source_type": source_type,
         "youtube_url": youtube_url,
         "spotify_url": spotify_url,
         "filename": audio_file.filename if audio_file else None,
         "model_name": model_name,
+        "mode": mode,
         "pitch_shift": pitch_shift,
         "f0_method": f0_method
     })
 
-    if audio_file:
-        clean_base = os.path.basename(audio_file.filename).replace(" ", "_").replace("'", "").replace('"', "")
-        dest_filename = f"{job_id}_{clean_base}"
-        saved_file_path = os.path.join(UPLOADS_DIR, dest_filename)
-        with open(saved_file_path, "wb") as buffer:
-            shutil.copyfileobj(audio_file.file, buffer)
-
-    background_tasks.add_task(
-        run_pipeline,
-        job_id=job_id,
+    params = studio_pipeline.JobParams(
+        mode=mode,
         source_type=source_type,
-        file_path=saved_file_path,
-        youtube_url=youtube_url,
+        file_path=_save_upload(audio_file, job_id) if audio_file else None,
+        url=None if audio_file else url,
         model_name=model_name,
         pitch_shift=pitch_shift,
         f0_method=f0_method,
         index_rate=index_rate,
         protect=protect,
+        style_strength=style_strength,
+        has_music=has_music,
+        split_backing=split_backing,
+        dereverb=dereverb,
+        pitch_mode=pitch_mode if apply_autotune else "off",
+        key=key,
+        correction_strength=autotune_strength,
+        retune_ms=retune_ms,
+        steadiness=steadiness,
+        vibrato=vibrato,
+        harmony=harmony,
+        guide_source_type="file" if guide_file else _url_source(guide_url),
+        guide_file_path=_save_upload(guide_file, f"{job_id}_guide") if guide_file else None,
+        guide_url=None if guide_file else guide_url,
+        align_timing=align_timing,
         vocal_gain_db=vocal_gain_db,
         inst_gain_db=inst_gain_db,
         reverb_amount=reverb_amount,
         echo_amount=echo_amount,
         warmth=warmth,
         clarity=clarity,
-        has_music=has_music,
-        apply_autotune=apply_autotune,
-        autotune_strength=autotune_strength,
-        style_strength=style_strength,
-        spotify_url=spotify_url
     )
-
+    JOB_EXECUTOR.submit(run_pipeline, job_id, params)
     return JSONResponse(content={"job_id": job_id, "status": "queued", "message": "Job queued successfully"})
+
+
+@app.post("/api/jobs/{job_id}/rerender")
+async def rerender_section(
+    job_id: str,
+    start_sec: float = Form(...),
+    end_sec: float = Form(...),
+    pitch_shift: Optional[int] = Form(None),
+    correction_strength: Optional[float] = Form(None),
+    index_rate: Optional[float] = Form(None),
+    protect: Optional[float] = Form(None),
+    style_strength: Optional[float] = Form(None),
+):
+    """Re-sing only one section of a finished job with new settings."""
+    job = job_manager.get_job(job_id)
+    job_dir = os.path.join(OUTPUTS_DIR, job_id)
+    if not job or job.get("status") != "completed" or not os.path.exists(os.path.join(job_dir, "pipeline_state.json")):
+        raise HTTPException(status_code=400, detail="Job must be a completed job from this version of Lyra.")
+    overrides = {"pitch_shift": pitch_shift, "correction_strength": correction_strength,
+                 "index_rate": index_rate, "protect": protect, "style_strength": style_strength}
+
+    def _work():
+        try:
+            job_manager.update_job(job_id, message=f"Re-rendering {start_sec:.1f}s-{end_sec:.1f}s...")
+            studio_pipeline.rerender_section(job_dir, start_sec, end_sec, overrides,
+                                             lambda p, m: job_manager.update_job(job_id, message=m))
+            job_manager.update_job(job_id, message=f"Section {start_sec:.1f}s-{end_sec:.1f}s re-rendered.")
+        except Exception as e:
+            job_manager.update_job(job_id, message=f"Section re-render failed: {e}")
+
+    future = JOB_EXECUTOR.submit(_work)
+    await asyncio.wrap_future(future)
+    now_ts = int(time.time() * 1000)
+    return JSONResponse(content={
+        "status": "success",
+        "master_mp3": f"/api/audio/{job_id}/master_mp3?t={now_ts}",
+        "master_clean_mp3": f"/api/audio/{job_id}/master_clean_mp3?t={now_ts}",
+        "vocal_wav": f"/api/audio/{job_id}/vocal_converted?t={now_ts}",
+    })
+
+
+# ---------------------------------------------------------------------------
+# Personal voices ("Keep my voice")
+# ---------------------------------------------------------------------------
+
+@app.get("/api/voices")
+async def list_voices():
+    return JSONResponse(content={"voices": voices.list_custom_voices()})
+
+
+@app.post("/api/voices/upload")
+async def upload_voice(name: str = Form(...), model_file: UploadFile = File(...), index_file: Optional[UploadFile] = File(None)):
+    """Register an RVC v2 .pth (+ optional .index) trained elsewhere as a personal voice."""
+    if not (model_file.filename or "").endswith(".pth"):
+        raise HTTPException(status_code=400, detail="Model must be an RVC .pth file")
+    stamp = str(int(time.time() * 1000))
+    pth = _save_upload(model_file, f"voice_{stamp}")
+    idx = _save_upload(index_file, f"voice_{stamp}") if index_file else None
+    meta = voices.register_uploaded_voice(name, pth, idx)
+    return JSONResponse(content={"voice": meta})
+
+
+@app.post("/api/voices/train")
+async def train_voice(
+    name: str = Form(...),
+    recordings: list[UploadFile] = File(...),
+    steps: int = Form(2000),
+):
+    """Train a personal voice model from 10-20 minutes of your own recordings."""
+    meta = voices.new_voice(name, status="queued")
+    vid = meta["id"]
+    data_dir = os.path.join(voices.CUSTOM_ROOT, vid, "recordings")
+    os.makedirs(data_dir, exist_ok=True)
+    paths = []
+    for i, rec in enumerate(recordings):
+        dest = os.path.join(data_dir, f"{i:03d}_{os.path.basename(rec.filename or 'take.wav')}")
+        with open(dest, "wb") as f:
+            shutil.copyfileobj(rec.file, f)
+        paths.append(dest)
+    steps = int(max(200, min(steps, 20000)))
+
+    def _work():
+        import voice_training
+        try:
+            audio_processor.unload_vc_cache()
+            voice_training.train_personal_voice(vid, paths, steps=steps)
+        except Exception as e:
+            print(f"Voice training failed for {vid}: {e}")
+
+    JOB_EXECUTOR.submit(_work)
+    return JSONResponse(content={"voice": meta})
+
+
+@app.get("/api/voices/{voice_id}")
+async def get_voice(voice_id: str):
+    meta = voices.read_meta(voice_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Voice not found")
+    return JSONResponse(content={"voice": meta})
+
+
+@app.delete("/api/voices/{voice_id}")
+async def delete_voice(voice_id: str):
+    audio_processor.unload_vc_cache()
+    if not voices.delete_voice(voice_id):
+        raise HTTPException(status_code=404, detail="Voice not found")
+    return JSONResponse(content={"status": "deleted", "id": voice_id})
+
+
+# ---------------------------------------------------------------------------
+# Composer exports: stems, MIDI, analysis
+# ---------------------------------------------------------------------------
+
+@app.get("/api/stems/{job_id}/all.zip")
+async def download_all_stems(job_id: str):
+    stems_dir = os.path.join(OUTPUTS_DIR, job_id, "stems")
+    if not os.path.isdir(stems_dir):
+        raise HTTPException(status_code=404, detail="No stems for this job")
+    zip_base = os.path.join(OUTPUTS_DIR, job_id, "lyra_stems")
+    extra = [os.path.join(OUTPUTS_DIR, job_id, f) for f in ("melody.mid", "analysis.json")]
+    staging = os.path.join(OUTPUTS_DIR, job_id, "_zip")
+    shutil.rmtree(staging, ignore_errors=True)
+    shutil.copytree(stems_dir, staging)
+    for f in extra:
+        if os.path.exists(f):
+            shutil.copy(f, staging)
+    path = shutil.make_archive(zip_base, "zip", staging)
+    shutil.rmtree(staging, ignore_errors=True)
+    return FileResponse(path, media_type="application/zip", filename=f"Lyra_{job_id}_stems.zip")
+
+
+@app.get("/api/stems/{job_id}/{stem}")
+async def get_stem(job_id: str, stem: str, request: Request, download: bool = False):
+    if not stem.replace("_", "").isalnum():
+        raise HTTPException(status_code=400, detail="Invalid stem name")
+    path = os.path.join(OUTPUTS_DIR, job_id, "stems", f"{stem}.wav")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Stem not found")
+    return stream_audio_file(path, request, "audio/wav", download=download, download_filename=f"Lyra_{stem}.wav")
+
+
+@app.get("/api/midi/{job_id}")
+async def get_midi(job_id: str):
+    path = os.path.join(OUTPUTS_DIR, job_id, "melody.mid")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="No MIDI for this job")
+    return FileResponse(path, media_type="audio/midi", filename=f"Lyra_{job_id}_melody.mid")
+
+
+@app.get("/api/melody/{job_id}")
+async def get_melody_notes(job_id: str):
+    """Notes of the final melody (for the piano-roll view)."""
+    path = os.path.join(OUTPUTS_DIR, job_id, "melody.mid")
+    analysis_path = os.path.join(OUTPUTS_DIR, job_id, "analysis.json")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="No melody for this job")
+    notes = _read_midi_notes(path)
+    analysis = {}
+    if os.path.exists(analysis_path):
+        with open(analysis_path) as f:
+            analysis = json.load(f)
+    return JSONResponse(content={"notes": notes, "analysis": analysis})
+
+
+def _read_midi_notes(path: str) -> list:
+    """Minimal reader for the type-0 files melody.py writes."""
+    import struct
+    with open(path, "rb") as f:
+        data = f.read()
+    ppq = struct.unpack(">H", data[12:14])[0]
+    pos = 22
+    tick, tempo = 0, 500000
+    active, notes = {}, []
+    while pos < len(data):
+        delta = 0
+        while True:
+            b = data[pos]; pos += 1
+            delta = (delta << 7) | (b & 0x7F)
+            if not b & 0x80:
+                break
+        tick += delta
+        status = data[pos]
+        if status == 0xFF:
+            mtype, length = data[pos + 1], data[pos + 2]
+            if mtype == 0x51:
+                tempo = int.from_bytes(data[pos + 3: pos + 6], "big")
+            pos += 3 + length
+            if mtype == 0x2F:
+                break
+            continue
+        note, vel = data[pos + 1], data[pos + 2]
+        pos += 3
+        sec = tick * tempo / 1e6 / ppq
+        if status & 0xF0 == 0x90 and vel > 0:
+            active[note] = (sec, vel)
+        elif note in active:
+            s, v = active.pop(note)
+            notes.append({"start": round(s, 3), "end": round(sec, 3), "note": note, "velocity": v})
+    return notes
 
 
 @app.get("/api/spotify/info")
@@ -482,8 +564,8 @@ async def get_spotify_track_info(url: str = Query(...)):
 @app.post("/api/tune_preview")
 async def tune_preview(audio_file: UploadFile = File(...)):
     """
-    Instantly tunes a recorded vocal track to perfect musical semitones (Sur lock)
-    using Praat PSOLA at maximum precision, returning the pitch-corrected WAV.
+    Quick "how would I sound in tune?" preview of a recorded take: note-level
+    pitch correction on the F0 curve, re-synthesized in the singer's own voice.
     """
     tmp_id = f"preview_{int(time.time() * 1000)}"
     tmp_dir = os.path.join(UPLOADS_DIR, tmp_id)
@@ -503,11 +585,12 @@ async def tune_preview(audio_file: UploadFile = File(...)):
             standard_path
         ], capture_output=True, check=True)
 
-        audio_processor.apply_ai_autotune(
-            input_wav=standard_path,
-            output_wav=tuned_path,
-            autotune_strength=1.0,
-            retune_speed_ms=10.0
+        # Same engine as the full pipeline: correct the pitch curve, re-synthesize once
+        import melody
+        import voice_enhance
+        voice_enhance.retune_world(
+            standard_path, tuned_path,
+            lambda f0, fps: melody.correct_pitch(f0, fps=fps, strength=0.9, retune_ms=30.0, steadiness=0.6, vibrato=0.3),
         )
 
         with open(tuned_path, "rb") as f:
@@ -660,23 +743,22 @@ async def quick_remix(
 
     job_dir = os.path.join(OUTPUTS_DIR, job_id)
     
-    # Locate vocal stem
-    autotuned_candidate = os.path.join(job_dir, "vocal_autotuned.wav")
-    need_autotune = apply_autotune
+    # Locate the dry rendered vocal (pitch is already corrected on the F0 curve)
     vocal_path = None
-
-    if apply_autotune and os.path.exists(autotuned_candidate):
-        vocal_path = autotuned_candidate
-        need_autotune = False  # already tuned, saves 15-20s CPU processing!
-    else:
-        for candidate in ["arijit_vocals.wav", "vocal_processed.wav", "vocal_autotuned.wav", "vocals.wav"]:
-            p = os.path.join(job_dir, candidate)
-            if os.path.exists(p):
-                vocal_path = p
-                break
+    for candidate in ["vocals_with_harmony.wav", "converted_vocals.wav", "arijit_vocals.wav", "vocal_autotuned.wav", "vocals.wav"]:
+        p = os.path.join(job_dir, candidate)
+        if os.path.exists(p):
+            vocal_path = p
+            break
 
     inst_path = os.path.join(job_dir, "instrumental.wav")
-    raw_vocal_path = os.path.join(job_dir, "vocals.wav")
+    for candidate in ["accompaniment.wav", os.path.join("guide", "accompaniment.wav"), "instrumental.wav"]:
+        if os.path.exists(os.path.join(job_dir, candidate)):
+            inst_path = os.path.join(job_dir, candidate)
+            break
+    raw_vocal_path = os.path.join(job_dir, "vocals_lead_dry.wav")
+    if not os.path.exists(raw_vocal_path):
+        raw_vocal_path = os.path.join(job_dir, "vocals.wav")
 
     if not vocal_path:
         raise HTTPException(status_code=404, detail="Vocal stem missing")
@@ -693,8 +775,7 @@ async def quick_remix(
         echo_amount=echo_amount,
         warmth=warmth,
         clarity=clarity,
-        apply_autotune=need_autotune,
-        autotune_strength=autotune_strength,
+        apply_autotune=False,
         center_anchor=center_anchor,
         presence_boost_db=presence_boost_db
     )
@@ -777,12 +858,17 @@ async def get_audio_file(job_id: str, track_type: str, request: Request, downloa
     job_dir = os.path.join(OUTPUTS_DIR, job_id)
     
     # Check for processed vocal stem with studio acoustics first
-    vocal_filename = "vocal_processed.wav" if os.path.exists(os.path.join(job_dir, "vocal_processed.wav")) else "arijit_vocals.wav"
+    vocal_filename = "vocal_processed.wav"
+    for cand in ["vocal_processed.wav", "converted_vocals.wav", "arijit_vocals.wav"]:
+        if os.path.exists(os.path.join(job_dir, cand)):
+            vocal_filename = cand
+            break
     
     file_map = {
         "input": "input_audio.wav",
         "vocal_original": "vocals.wav",
-        "instrumental": "instrumental.wav",
+        "instrumental": "accompaniment.wav" if os.path.exists(os.path.join(job_dir, "accompaniment.wav")) else (
+            "guide/accompaniment.wav" if os.path.exists(os.path.join(job_dir, "guide", "accompaniment.wav")) else "instrumental.wav"),
         "vocal_arijit": vocal_filename,
         "vocal_converted": vocal_filename,
         "vocal_autotuned": "vocal_autotuned.wav",
@@ -813,13 +899,13 @@ async def get_audio_file(job_id: str, track_type: str, request: Request, downloa
                         break
         # Fallbacks for master tracks
         elif track_type in ["master_mp3", "master_wav"]:
-            for alt in ["master_remastered.mp3", "master_remastered.wav", "vocal_processed.wav", "arijit_vocals.wav", "vocal_pitch_perfect.wav", "vocals.wav"]:
+            for alt in ["master_remastered.mp3", "master_remastered.wav", "vocal_processed.wav", "converted_vocals.wav", "arijit_vocals.wav", "vocal_pitch_perfect.wav", "vocals.wav"]:
                 alt_p = os.path.join(job_dir, alt)
                 if os.path.exists(alt_p) and os.path.getsize(alt_p) > 100:
                     file_path = alt_p
                     break
         elif track_type in ["vocal_arijit", "vocal_converted", "vocal_autotuned"]:
-            for alt in ["vocal_processed.wav", "vocal_autotuned.wav", "arijit_vocals.wav", "vocal_pitch_perfect.wav", "vocals.wav"]:
+            for alt in ["vocal_processed.wav", "converted_vocals.wav", "vocal_autotuned.wav", "arijit_vocals.wav", "vocal_pitch_perfect.wav", "vocals.wav"]:
                 alt_p = os.path.join(job_dir, alt)
                 if os.path.exists(alt_p) and os.path.getsize(alt_p) > 100:
                     file_path = alt_p
@@ -866,6 +952,17 @@ async def get_available_models():
             "weights_size_mb": round(os.path.getsize(pth_path)/(1024*1024), 2) if os.path.exists(pth_path) else 0,
             "has_index": os.path.exists(idx_path),
             "index_size_mb": round(os.path.getsize(idx_path)/(1024*1024), 2) if os.path.exists(idx_path) else 0,
+            "kind": "singer",
+        })
+    for v in voices.list_custom_voices():
+        models_list.append({
+            "id": v["id"],
+            "name": v["name"],
+            "tagline": v.get("tagline", ""),
+            "is_ready": v["is_ready"],
+            "has_index": v["has_index"],
+            "kind": "personal",
+            "status": v.get("status"),
         })
     return JSONResponse(content={"models": models_list})
 
@@ -895,7 +992,9 @@ async def get_system_info():
         "model_name": "Arijit Singh, Sonu Nigam & KK RVC v2",
         "models": models_summary,
         "default_model": "arijit_singh",
-        "torch_device": "mps" if torch.backends.mps.is_available() else "cpu",
+        "torch_device": "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"),
+        "separation": {"vocals": separation.VOCAL_MODEL, "karaoke": separation.KARAOKE_MODEL, "dereverb": separation.DEREVERB_MODEL},
+        "personal_voices": len(voices.list_custom_voices()),
         "demucs_ready": True,
         "autotune_ready": True
     }

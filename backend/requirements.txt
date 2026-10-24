@@ -1,0 +1,34 @@
+# Lyra backend
+# GPU users: install torch/torchaudio for your CUDA version first (https://pytorch.org)
+torch
+torchaudio
+numpy
+scipy
+soundfile
+librosa
+av
+ffmpeg-python
+praat-parselmouth
+pyworld
+setuptools<81        # pyworld still imports pkg_resources
+faiss-cpu
+transformers
+demucs                # fallback vocal separator
+pyyaml                # RoFormer (pymss) model configs
+tqdm
+
+# API
+fastapi
+uvicorn
+python-multipart
+python-dotenv
+httpx
+
+# Sources & storage
+yt-dlp
+gradio_client
+boto3
+
+# Optional benchmark metrics (tools/benchmark.py)
+# speechbrain
+# openai-whisper
