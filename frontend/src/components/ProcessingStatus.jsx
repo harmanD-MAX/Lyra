@@ -50,6 +50,7 @@ export default function ProcessingStatus({ job, selectedModel, onReset }) {
             colorA={isError ? '#fb7185' : '#e5a958'}
             colorB={isError ? '#fda4af' : '#3fe0c5'}
             interactive={false}
+            scale={0.62}
           />
           </Suspense>
           <div className="absolute inset-0 grid place-items-center pointer-events-none">

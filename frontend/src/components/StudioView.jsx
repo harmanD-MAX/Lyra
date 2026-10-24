@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import ProcessingStatus from './ProcessingStatus';
 import ComposerTools from './ComposerTools';
-import LiveSpectrum from './audio/LiveSpectrum';
+import LiveAura from './audio/LiveAura';
 import { decodeTrack } from './audio/spectrum';
 const VoiceOrb = lazy(() => import('./three/VoiceOrb'));
 
@@ -1300,21 +1300,9 @@ export default function StudioView({
                     </div>
                   </div>
 
-                  {/* Stage: 3D orb + waveform */}
-                  <div className="flex-1 min-h-0 grid lg:grid-cols-[minmax(0,220px)_1fr] gap-3">
-                    <div className="hidden lg:block relative panel-inset overflow-hidden">
-                      <div className="absolute inset-x-0 top-[42%] -translate-y-1/2 aspect-square"><Suspense fallback={null}><VoiceOrb className="w-full h-full" active={isPlaying} interactive={false} levelRef={audioLevelRef} /></Suspense></div>
-                      <div className="absolute inset-x-0 bottom-0 p-3 flex items-center justify-between bg-gradient-to-t from-black/70 to-transparent">
-                        <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-white/60">{isPlaying ? 'Now playing' : 'Paused'}</span>
-                        <span className={`eq-loader text-[#3fe0c5] ${isPlaying ? '' : 'is-paused'}`}><span /><span /><span /><span /></span>
-                      </div>
-                      <div className="absolute top-3 inset-x-3 flex items-center justify-between">
-                        <span className="text-[10px] font-mono text-white/40">{singerName}</span>
-                        <span className="text-[10px] font-mono text-white/40">3D</span>
-                      </div>
-                    </div>
-
-                    <div className="panel-inset p-3 sm:p-4 flex flex-col gap-3 min-h-0">
+                  {/* Stage: live aura + 3D orb, real waveform, scrubber */}
+                  <div className="flex-1 min-h-0 flex">
+                    <div className="panel-inset p-3 sm:p-4 flex flex-col gap-3 min-h-0 flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-3 flex-shrink-0">
                         <span className="chip chip-gold max-w-[60%] truncate">
                           {activeTrack === 'vocal_arijit' ? `${singerName} · solo vocal` : activeStem.label}
@@ -1361,20 +1349,31 @@ export default function StudioView({
                         </div>
                       </div>
 
-                      {/* Live visualizer: follows the real audio at the playhead */}
-                      <div className="relative flex-1 min-h-[90px]">
-                        <LiveSpectrum
-                          track={decoded}
-                          getTime={getPlayheadTime}
-                          playing={isPlaying}
-                          levelRef={audioLevelRef}
-                          className="absolute inset-0 w-full h-full"
-                        />
+                      {/* Live aura around the 3D orb, driven by the real audio at the playhead */}
+                      <div className="relative flex-1 min-h-[150px] grid place-items-center overflow-hidden">
+                        <div className="relative h-full max-w-full aspect-square">
+                          <LiveAura
+                            track={decoded}
+                            getTime={getPlayheadTime}
+                            playing={isPlaying}
+                            levelRef={audioLevelRef}
+                            className="absolute inset-0 w-full h-full"
+                          />
+                          <div className="absolute inset-[17%]">
+                            <Suspense fallback={null}>
+                              <VoiceOrb className="w-full h-full" active={isPlaying} interactive={false} levelRef={audioLevelRef} scale={0.6} />
+                            </Suspense>
+                          </div>
+                        </div>
                         {!decoded && (
-                          <span className="absolute left-1 top-1 chip !h-6 animate-fadeIn">
+                          <span className="absolute left-0 top-0 chip !h-6 animate-fadeIn">
                             <span className="eq-loader text-[#e5a958] !h-3"><span /><span /><span /></span> Analysing audio…
                           </span>
                         )}
+                        <span className="absolute right-0 bottom-0 text-[10px] font-mono uppercase tracking-[0.18em] text-white/40 flex items-center gap-2">
+                          <span className={`w-1.5 h-1.5 rounded-full ${isPlaying ? 'bg-[#3fe0c5] shadow-[0_0_8px_#3fe0c5]' : 'bg-white/30'}`} />
+                          {isPlaying ? 'Now playing' : 'Paused'}
+                        </span>
                       </div>
 
                       {/* Real waveform of the track (click to seek) */}
