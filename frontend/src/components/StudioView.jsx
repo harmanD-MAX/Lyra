@@ -9,6 +9,7 @@ import {
   PlusCircle, Radio, Trash2, Check, Cloud, Headphones
 } from 'lucide-react';
 import ProcessingStatus from './ProcessingStatus';
+import ComposerTools from './ComposerTools';
 
 export default function StudioView({
   selectedModel,
@@ -32,8 +33,13 @@ export default function StudioView({
   onStartConversion,
   onResetJob,
   onBackToLanding,
-  onDeleteJob
+  onDeleteJob,
+  personalVoices = [],
+  creativeSummaryText = '',
+  onOpenCreative,
+  onOpenVoiceLab
 }) {
+  const [showComposerTools, setShowComposerTools] = useState(false);
   // Navigation tabs in sidebar: 'studio' | 'my-songs' (Templates & Settings removed per request)
   const [activeTab, setActiveTab] = useState('studio');
 
@@ -100,7 +106,9 @@ export default function StudioView({
   // When job completes or changes, auto-load track
   const currentResults = currentJob?.results;
   const singerName = currentResults?.singer || (
-    selectedModel === 'sonu_nigam' ? 'Sonu Nigam' : selectedModel === 'kk' ? 'KK' : 'Arijit Singh'
+    selectedModel === 'raw' ? 'Your Voice'
+      : personalVoices.find((v) => v.id === selectedModel)?.name
+      || (selectedModel === 'sonu_nigam' ? 'Sonu Nigam' : selectedModel === 'kk' ? 'KK' : 'Arijit Singh')
   );
 
   // Cloudflare R2 Single-File Storage States & Confirmation Modal
@@ -882,6 +890,7 @@ export default function StudioView({
                 { id: 'arijit_singh', name: 'Arijit Singh', vibe: 'Soulful Ballad & Warmth' },
                 { id: 'sonu_nigam', name: 'Sonu Nigam', vibe: 'Classical Range & Laser Pitch' },
                 { id: 'kk', name: 'KK', vibe: 'Raw Rock Tenor & Power' },
+                ...personalVoices.filter((v) => v.is_ready).map((v) => ({ id: v.id, name: v.name, vibe: 'Your personal voice model' })),
               ].map(model => (
                 <button
                   key={model.id}
@@ -901,6 +910,13 @@ export default function StudioView({
                   <div className="text-[10px] text-white/50 truncate mt-0.5">{model.vibe}</div>
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={onOpenVoiceLab}
+                className="w-full text-left p-2.5 rounded-xl border border-dashed border-[#e5a958]/40 text-xs text-[#e5a958] hover:bg-[#e5a958]/10 transition-all cursor-pointer"
+              >
+                + Voice Lab: train your own voice
+              </button>
             </div>
           </div>
 
@@ -1510,6 +1526,15 @@ export default function StudioView({
                       <span>Download uncompressed master audio or preserve Master 3D in Cloudflare R2.</span>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setShowComposerTools(true)}
+                        className="px-3.5 py-1.5 rounded-xl bg-[#3fe0c5]/15 hover:bg-[#3fe0c5]/25 border border-[#3fe0c5]/40 text-[#3fe0c5] text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
+                        title="Stems, MIDI, key/BPM and section re-render"
+                      >
+                        <Sliders className="w-3.5 h-3.5" />
+                        <span>Stems · MIDI · Re-render</span>
+                      </button>
                       {/* Cloudflare R2 Single-File Cloud Storage Button / Status Badge */}
                       {currentResults.saved_to_cloud ? (
                         <div
@@ -2076,6 +2101,20 @@ export default function StudioView({
 
                   </div>
 
+                  {/* Creative controls summary */}
+                  <div className="pt-3 flex-shrink-0 flex items-center gap-2">
+                    <div className="flex-1 min-w-0 truncate text-[11px] font-mono text-white/55 px-3 py-2 rounded-xl bg-black/30 border border-white/5">
+                      {creativeSummaryText}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onOpenCreative}
+                      className="flex-shrink-0 px-4 py-2 rounded-xl border border-[#e5a958]/40 text-[#e5a958] text-xs font-semibold hover:bg-[#e5a958]/10 cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Sliders className="w-3.5 h-3.5" /> Creative controls
+                    </button>
+                  </div>
+
                   {/* Submit Transform Button */}
                   <div className="pt-3 flex-shrink-0">
                     <button
@@ -2223,6 +2262,12 @@ export default function StudioView({
         </div>
       )}
 
+      <ComposerTools
+        open={showComposerTools}
+        onClose={() => setShowComposerTools(false)}
+        job={currentJob}
+        onRerendered={() => setCacheBuster(String(Date.now()))}
+      />
     </div>
   );
 }

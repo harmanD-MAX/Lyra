@@ -41,63 +41,34 @@ export default function Header({ currentView = 'landing', onViewChange }) {
           </span>
         </div>
 
-        {/* Center Nav Links - Perfectly Centered in Navbar */}
-        <nav className="hidden md:flex items-center gap-7 lg:gap-8 text-sm font-medium text-white/80 absolute left-1/2 -translate-x-1/2">
-          <button
-            type="button"
-            onClick={() => handleNavigation('features')}
-            className="hover:text-white transition-colors cursor-pointer"
-          >
-            Features
-          </button>
-          <button
-            type="button"
-            onClick={() => handleNavigation('models')}
-            className="hover:text-white transition-colors cursor-pointer"
-          >
-            Vocalists
-          </button>
-          <button
-            type="button"
-            onClick={() => handleNavigation('benchmarks')}
-            className="hover:text-white transition-colors cursor-pointer"
-          >
-            Benchmarks
-          </button>
-          <button
-            type="button"
-            onClick={() => handleNavigation('pricing')}
-            className="hover:text-white transition-colors cursor-pointer"
-          >
-            Pricing
-          </button>
-          <button
-            type="button"
-            onClick={() => handleNavigation('faq')}
-            className="hover:text-white transition-colors cursor-pointer"
-          >
-            FAQ
-          </button>
+        {/* Center Nav Links */}
+        <nav className="hidden md:flex items-center gap-7 lg:gap-8 text-sm font-medium text-white/75 absolute left-1/2 -translate-x-1/2">
+          {[
+            ['features', 'How it works'],
+            ['myvoice', 'My Voice'],
+            ['models', 'Voices'],
+            ['composers', 'Composers'],
+            ['faq', 'FAQ'],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => handleNavigation(id)}
+              className="relative hover:text-white transition-colors cursor-pointer after:absolute after:left-0 after:-bottom-1 after:h-px after:w-0 after:bg-[#e5a958] after:transition-all hover:after:w-full"
+            >
+              {label}
+            </button>
+          ))}
         </nav>
 
-        {/* Right Action Buttons */}
-        <div className="flex items-center gap-5 text-sm font-medium">
-          <button
-            type="button"
-            onClick={() => onViewChange && onViewChange('studio')}
-            className="text-white/85 hover:text-white transition-colors cursor-pointer px-2 py-1"
-          >
-            Sign in
-          </button>
-          
-          <button
-            type="button"
-            onClick={() => onViewChange && onViewChange('studio')}
-            className="bg-[#0e0f12] hover:bg-black text-white px-5 py-2.5 rounded-full border border-white/15 hover:border-white/30 transition-all cursor-pointer font-medium shadow-lg hover:shadow-xl active:scale-95"
-          >
-            Get Started
-          </button>
-        </div>
+        {/* Right Action */}
+        <button
+          type="button"
+          onClick={() => onViewChange && onViewChange('studio')}
+          className="bg-[#e5a958] hover:bg-[#f0bb6e] text-black px-5 py-2.5 rounded-full transition-all cursor-pointer text-sm font-semibold shadow-[0_0_24px_rgba(229,169,88,0.35)] hover:shadow-[0_0_36px_rgba(229,169,88,0.55)] active:scale-95"
+        >
+          Open Studio
+        </button>
 
       </div>
     </header>
