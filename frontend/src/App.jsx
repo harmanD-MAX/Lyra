@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Header from './components/Header';
 import LandingPage from './components/LandingPage';
 import StudioView from './components/StudioView';
-import CreativeControls from './components/CreativeControls';
-import { DEFAULT_CREATIVE, creativeSummary, resolveCreative } from './creative';
+import { DEFAULT_CREATIVE, resolveCreative } from './creative';
 
 export default function App() {
   // Navigation view: 'landing' | 'studio'
@@ -304,25 +303,8 @@ export default function App() {
           onBackToLanding={() => navigateTo('landing')}
           onDeleteJob={handleDeleteJob}
           personalVoices={personalVoices}
-          creativeSummaryText={creativeSummary(
-            creative,
-            selectedModel === 'raw' ? 'Your voice'
-              : personalVoices.find((v) => v.id === selectedModel)?.name
-              || ({ arijit_singh: 'Arijit Singh', sonu_nigam: 'Sonu Nigam', kk: 'KK' }[selectedModel] || selectedModel)
-          )}
-          onOpenCreative={() => setShowCreative(true)}
         />
       )}
-
-      <CreativeControls
-        open={showCreative}
-        onClose={() => setShowCreative(false)}
-        creative={creative}
-        setCreative={setCreative}
-        selectedModel={selectedModel}
-        setSelectedModel={setSelectedModel}
-        personalVoices={personalVoices}
-      />
 
     </div>
   );
