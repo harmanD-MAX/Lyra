@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import LyraLogo from './LyraLogo';
 import {
   Compass, Music2, Play, Pause,
@@ -11,9 +11,8 @@ import {
 } from 'lucide-react';
 import ProcessingStatus from './ProcessingStatus';
 import ComposerTools from './ComposerTools';
-import LiveAura from './audio/LiveAura';
-import { decodeTrack } from './audio/spectrum';
-const VoiceOrb = lazy(() => import('./three/VoiceOrb'));
+import VoiceRing from './VoiceRing';
+import { decodeTrack, createAnalyser } from './audio/spectrum';
 
 const GOLD = '#e5a958';
 const TEAL = '#3fe0c5';
@@ -40,6 +39,11 @@ const WAVE = [
   54, 38, 50, 70, 88, 98, 80, 60, 42, 56, 76, 92, 68, 48, 34, 46, 64, 80, 92, 76,
   52, 36, 48, 68, 86, 94, 78, 58, 40, 28, 20, 14,
 ];
+
+const hexToRgb = (hex) => {
+  const v = parseInt(hex.replace('#', ''), 16);
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+};
 
 /** Strip YouTube boilerplate from a track title. */
 function cleanTitle(title, fallback = 'Studio Vocal Project') {
@@ -466,7 +470,6 @@ export default function StudioView({
 
   // Decoded samples of the stem that's playing, for the live visualizer
   const [decodedEntry, setDecodedEntry] = useState(null);
-  const audioLevelRef = useRef(0);
   const activeStemSrc = currentJob?.id && currentResults ? getStemSource(activeTrack) : '';
   useEffect(() => {
     if (!activeStemSrc) return undefined;
@@ -481,6 +484,24 @@ export default function StudioView({
     () => stemAudiosRef.current[activeTrack]?.currentTime || 0,
     [activeTrack],
   );
+
+  // Voice ring: real spectrum while playing, a quiet breath while paused
+  const ringAnalyser = useMemo(() => (decoded ? createAnalyser(decoded) : null), [decoded]);
+  const isPlayingRef = useRef(isPlaying);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  const getRingBands = useCallback((t, n) => {
+    const out = new Array(n);
+    if (isPlayingRef.current && ringAnalyser) {
+      const { bands } = ringAnalyser(getPlayheadTime(), 48);
+      for (let i = 0; i < n; i++) {
+        const u = Math.abs((i / n) * 2 - 1); // low notes at the top, highs at the bottom, mirrored
+        out[i] = 0.04 + bands[Math.min(47, Math.floor(u * 47.99))] * 1.05;
+      }
+    } else {
+      for (let i = 0; i < n; i++) out[i] = 0.07 + 0.04 * (0.5 + 0.5 * Math.sin(t * 1.4 + i * 0.3));
+    }
+    return out;
+  }, [ringAnalyser, getPlayheadTime]);
 
   // Auto-preload all stem audio elements in parallel as soon as job completes
   useEffect(() => {
@@ -962,6 +983,9 @@ export default function StudioView({
   const playhead = isSeeking ? seekTime : currentTime;
   const playPct = maxDuration > 0 ? Math.min(1, Math.max(0, playhead / maxDuration)) : 0;
   const activeStem = STEMS.find((st) => st.id === activeTrack) || STEMS[0];
+  const ringSinger = SINGERS.find((sg) => singerName.toLowerCase().includes(sg.name.toLowerCase().split(' ')[0].toLowerCase()));
+  const ringColor = hexToRgb(ringSinger?.color || '#a78bfa');
+  const ringInitials = ringSinger?.initials || (selectedModel === 'raw' ? 'You' : singerName.slice(0, 2).toUpperCase());
   const engineLabel = selectedEngine === 'seedvc' ? 'Seed-VC · 44.1 kHz' : 'RVC v2 · 48 kHz';
   const isRecordedTake = Boolean(audioFile && audioFile.name?.startsWith('vocal_recording_'));
 
@@ -1349,31 +1373,23 @@ export default function StudioView({
                         </div>
                       </div>
 
-                      {/* Live aura around the 3D orb, driven by the real audio at the playhead */}
+                      {/* Voice ring driven by the real audio at the playhead */}
                       <div className="relative flex-1 min-h-[150px] grid place-items-center overflow-hidden">
-                        <div className="relative h-full max-w-full aspect-square">
-                          <LiveAura
-                            track={decoded}
-                            getTime={getPlayheadTime}
-                            playing={isPlaying}
-                            levelRef={audioLevelRef}
-                            className="absolute inset-0 w-full h-full"
-                          />
-                          <div className="absolute inset-[17%]">
-                            <Suspense fallback={null}>
-                              <VoiceOrb className="w-full h-full" active={isPlaying} interactive={false} levelRef={audioLevelRef} scale={0.6} />
-                            </Suspense>
+                        <VoiceRing className="h-full max-w-full" color={ringColor} getBands={getRingBands}>
+                          <div className="px-2">
+                            <div className="text-[9px] sm:text-[10px] font-mono uppercase tracking-[0.22em] text-white/40">{isPlaying ? 'Now playing' : 'Paused'}</div>
+                            <div className="mt-1 text-2xl sm:text-3xl font-bold leading-none" style={{ fontFamily: 'var(--font-display)', color: `rgb(${ringColor.join(',')})` }}>
+                              {ringInitials}
+                            </div>
+                            <div className="mt-1.5 text-xs sm:text-sm font-semibold text-white truncate max-w-[9rem]">{singerName}</div>
+                            <div className="text-[10px] sm:text-[11px] text-white/45">{activeStem.label}</div>
                           </div>
-                        </div>
+                        </VoiceRing>
                         {!decoded && (
                           <span className="absolute left-0 top-0 chip !h-6 animate-fadeIn">
                             <span className="eq-loader text-[#e5a958] !h-3"><span /><span /><span /></span> Analysing audio…
                           </span>
                         )}
-                        <span className="absolute right-0 bottom-0 text-[10px] font-mono uppercase tracking-[0.18em] text-white/40 flex items-center gap-2">
-                          <span className={`w-1.5 h-1.5 rounded-full ${isPlaying ? 'bg-[#3fe0c5] shadow-[0_0_8px_#3fe0c5]' : 'bg-white/30'}`} />
-                          {isPlaying ? 'Now playing' : 'Paused'}
-                        </span>
                       </div>
 
                       {/* Real waveform of the track (click to seek) */}
