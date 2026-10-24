@@ -53,6 +53,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_scan_jobs():
     job_manager._load()
+    job_manager.sync_cloud_catalog()
 
     for name in os.listdir(OUTPUTS_DIR):
         job_dir = os.path.join(OUTPUTS_DIR, name)
@@ -245,6 +246,44 @@ def run_pipeline(job_id: str, params: "studio_pipeline.JobParams"):
             "settings": params.to_dict(),
         }
         results["settings"]["singer_name"] = target_name
+
+        # Auto-upload Master 3D to Cloudflare R2 cloud storage upon completion
+        if r2_storage.is_r2_configured():
+            master_file = os.path.join(job_dir, "master_remastered.mp3")
+            if not os.path.exists(master_file):
+                for cand in ["master_clean.mp3", "master_remastered.wav"]:
+                    cp = os.path.join(job_dir, cand)
+                    if os.path.exists(cp):
+                        master_file = cp
+                        break
+            if os.path.exists(master_file):
+                remote_key = f"{job_id}/master_3d.mp3"
+                content_type = "audio/mpeg" if master_file.endswith(".mp3") else "audio/wav"
+                cloud_url = r2_storage.upload_audio_to_r2(master_file, remote_key, content_type=content_type)
+                if cloud_url:
+                    results["saved_to_cloud"] = True
+                    results["cloud_master_3d_url"] = cloud_url
+                    try:
+                        catalog = r2_storage.get_cloud_catalog()
+                        catalog[job_id] = {
+                            "id": job_id,
+                            "status": "completed",
+                            "progress": 100,
+                            "created_at": time.time(),
+                            "updated_at": time.time(),
+                            "metadata": {
+                                "title": results["title"],
+                                "singer": target_name,
+                                "model_name": params.model_name,
+                                "duration": results["duration"],
+                                "thumbnail": results["thumbnail"],
+                            },
+                            "results": results
+                        }
+                        r2_storage.save_cloud_catalog(catalog)
+                        print(f"Job {job_id} Master 3D auto-saved to Cloudflare R2: {cloud_url}")
+                    except Exception as cat_err:
+                        print("Error updating R2 cloud catalog:", cat_err)
 
         job_manager.update_job(job_id, status="completed", progress=100,
                                message=f"{target_name} version finished!", results=results)
