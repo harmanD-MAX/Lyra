@@ -311,3 +311,13 @@ html {
   }
   .tilt-card { transform: none !important; }
 }
+
+/* Subtle perspective grid behind the hero (no photo, keeps text legible) */
+.hero-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse at 60% 45%, black 20%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse at 60% 45%, black 20%, transparent 70%);
+}

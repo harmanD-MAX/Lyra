@@ -125,19 +125,31 @@ export default function VoiceLab({ open, onClose, voices, onVoicesChanged }) {
               {files.length ? `${files.length} recording${files.length > 1 ? 's' : ''} · ${totalMb.toFixed(1)} MB` : 'Choose recordings (WAV/MP3/M4A)'}
             </button>
             <input ref={recInput} type="file" accept="audio/*" multiple className="hidden" onChange={(e) => setFiles(Array.from(e.target.files || []))} />
-            <label className="block">
-              <div className="flex justify-between text-xs mb-1.5"><span className="text-white/80">Training length</span><span className="font-mono text-white/50">{steps} steps</span></div>
-              <input type="range" min="500" max="6000" step="250" value={steps} onChange={(e) => setSteps(parseInt(e.target.value, 10))} className="lyra-range w-full" />
-              <span className="text-[11px] text-white/40">More steps = closer likeness, longer training (GPU recommended).</span>
-            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {[[1000, 'Quick', 'Rough likeness'], [2000, 'Standard', 'Recommended'], [4000, 'Best', 'Closest, slowest']].map(([n, label, hint]) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setSteps(n)}
+                  className={`rounded-xl border px-3 py-2.5 text-left cursor-pointer transition ${steps === n ? 'border-[#e5a958] bg-[#e5a958]/10' : 'border-white/10 hover:border-white/25'}`}
+                >
+                  <div className="text-sm font-medium">{label}</div>
+                  <div className="text-[11px] text-white/45">{hint}</div>
+                </button>
+              ))}
+            </div>
             <button type="button" disabled={busy || training} onClick={train} className="w-full rounded-full bg-[#e5a958] text-black font-semibold py-3 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
               {training ? 'A voice is training…' : busy ? 'Uploading…' : 'Train my voice'}
             </button>
           </section>
 
           {/* Upload */}
-          <section className="rounded-2xl border border-white/10 p-5 space-y-3">
-            <div className="text-sm font-semibold">Already have an RVC v2 model?</div>
+          <details className="group rounded-2xl border border-white/10">
+            <summary className="list-none flex items-center justify-between px-5 py-3.5 cursor-pointer text-sm text-white/60 hover:text-white">
+              Already have an RVC v2 model?
+              <span className="text-white/40 transition-transform group-open:rotate-180">⌄</span>
+            </summary>
+            <div className="px-5 pb-5 space-y-3">
             <input value={uploadName} onChange={(e) => setUploadName(e.target.value)} placeholder="Voice name" className="w-full bg-[#1a1d23] border border-white/10 rounded-lg px-3 py-2 text-sm" />
             <div className="grid sm:grid-cols-2 gap-2 text-xs">
               <label className="rounded-lg border border-white/10 px-3 py-2.5 cursor-pointer hover:border-white/30 truncate">
@@ -150,7 +162,8 @@ export default function VoiceLab({ open, onClose, voices, onVoicesChanged }) {
               </label>
             </div>
             <button type="button" disabled={busy} onClick={upload} className="w-full rounded-full border border-white/20 py-2.5 text-sm hover:border-white/40 cursor-pointer disabled:opacity-40">Add model</button>
-          </section>
+            </div>
+          </details>
 
           {error && <p className="text-sm text-rose-300">{error}</p>}
         </div>

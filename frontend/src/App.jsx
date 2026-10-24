@@ -3,7 +3,7 @@ import Header from './components/Header';
 import LandingPage from './components/LandingPage';
 import StudioView from './components/StudioView';
 import CreativeControls from './components/CreativeControls';
-import { DEFAULT_CREATIVE, creativeSummary } from './creative';
+import { DEFAULT_CREATIVE, creativeSummary, resolveCreative } from './creative';
 import VoiceLab from './components/VoiceLab';
 
 export default function App() {
@@ -202,6 +202,7 @@ export default function App() {
     }
 
     const c = creative;
+    const r = resolveCreative(c);
     const myVoice = c.studioMode === 'my_voice';
     if (selectedModel === 'raw' && !myVoice) {
       setErrorMsg('"Your voice" is a My Voice target. Switch mode in Creative controls or pick another voice.');
@@ -222,22 +223,22 @@ export default function App() {
     formData.append('warmth', 0.50);
     formData.append('clarity', 0.85);
     // Melody engine (pitch correction happens on the F0 curve, once)
-    formData.append('apply_autotune', c.pitchMode !== 'off');
-    formData.append('pitch_mode', c.pitchMode);
-    formData.append('key', c.key);
-    if (c.correction !== null) formData.append('autotune_strength', c.correction);
-    formData.append('steadiness', c.steadiness);
-    formData.append('vibrato', c.vibrato);
-    formData.append('retune_ms', c.retuneMs);
-    formData.append('harmony', selectedModel === 'raw' ? 'none' : c.harmony);
-    formData.append('split_backing', c.splitBacking);
-    formData.append('dereverb', c.dereverb);
+    formData.append('apply_autotune', r.pitchMode !== 'off');
+    formData.append('pitch_mode', r.pitchMode);
+    formData.append('key', r.key);
+    formData.append('autotune_strength', r.correction);
+    formData.append('steadiness', r.steadiness);
+    formData.append('vibrato', r.vibrato);
+    formData.append('retune_ms', r.retuneMs);
+    formData.append('harmony', selectedModel === 'raw' ? 'none' : r.harmony);
+    formData.append('split_backing', r.splitBacking);
+    formData.append('dereverb', r.dereverb);
     // A recorded or "My Voice" take is a bare vocal unless it's a full song link
     formData.append('has_music', !(activeMode === 'record' || (myVoice && activeMode === 'file')));
     if (myVoice) {
       if (c.guideFile) formData.append('guide_file', c.guideFile);
       else if (c.guideUrl.trim()) formData.append('guide_url', c.guideUrl.trim());
-      formData.append('align_timing', c.alignTiming);
+      formData.append('align_timing', r.alignTiming);
     }
 
     try {

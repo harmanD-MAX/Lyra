@@ -52,7 +52,6 @@ export default function ComposerTools({ open, onClose, job, onRerendered }) {
   const [start, setStart] = useState(0);
   const [end, setEnd] = useState(8);
   const [pitch, setPitch] = useState(0);
-  const [correction, setCorrection] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
@@ -74,7 +73,6 @@ export default function ComposerTools({ open, onClose, job, onRerendered }) {
       fd.append('start_sec', start);
       fd.append('end_sec', end);
       fd.append('pitch_shift', pitch);
-      if (correction !== '') fd.append('correction_strength', correction);
       const res = await fetch(`/api/jobs/${job.id}/rerender`, { method: 'POST', body: fd });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Re-render failed');
       setMsg(`Re-rendered ${start}s – ${end}s.`);
@@ -149,7 +147,7 @@ export default function ComposerTools({ open, onClose, job, onRerendered }) {
               <p className="text-sm text-white/45">Available for renders made with a voice model.</p>
             ) : (
               <>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div className="grid grid-cols-3 gap-3 text-xs">
                   {[
                     ['Start (s)', start, setStart, 0.1],
                     ['End (s)', end, setEnd, 0.1],
@@ -160,10 +158,6 @@ export default function ComposerTools({ open, onClose, job, onRerendered }) {
                       <input type="number" step={step} value={val} onChange={(e) => set(parseFloat(e.target.value) || 0)} className="mt-1 w-full bg-[#1a1d23] border border-white/10 rounded-lg px-2 py-2 text-sm" />
                     </label>
                   ))}
-                  <label className="block">
-                    <span className="text-white/60">Correction (0–1)</span>
-                    <input type="number" step="0.05" min="0" max="1" placeholder="same" value={correction} onChange={(e) => setCorrection(e.target.value)} className="mt-1 w-full bg-[#1a1d23] border border-white/10 rounded-lg px-2 py-2 text-sm" />
-                  </label>
                 </div>
                 <button type="button" disabled={busy || end <= start} onClick={rerender} className="rounded-full bg-[#e5a958] text-black font-semibold px-5 py-2.5 text-sm cursor-pointer disabled:opacity-40 inline-flex items-center gap-2">
                   {busy && <Loader2 className="w-4 h-4 animate-spin" />} Re-render section
