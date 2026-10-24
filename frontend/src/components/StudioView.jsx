@@ -491,11 +491,21 @@ export default function StudioView({
     setActiveTab('studio');
   };
 
+  // Full-song in-memory preloading states
+  const [blobAudioUrl, setBlobAudioUrl] = useState('');
+  const [isFullyLoaded, setIsFullyLoaded] = useState(false);
+
   // Determine stem audio source URL
   const getStemSource = (trackId, cbOverride = null) => {
     if (!currentJob?.id) return '';
     const effectiveCb = cbOverride !== null ? cbOverride : cacheBuster;
     const cb = effectiveCb ? `?cb=${effectiveCb}` : '';
+
+    // Direct Cloudflare R2 CDN URL for Master 3D if available (bypasses Colab tunnel, 50x faster)
+    if (trackId === 'master' && currentResults?.cloud_master_3d_url) {
+      return currentResults.cloud_master_3d_url;
+    }
+
     switch (trackId) {
       case 'master_clean':
         return `/api/audio/${currentJob.id}/master_clean${cb}`;
@@ -516,6 +526,50 @@ export default function StudioView({
   // Decoded samples of the master track for the live spectrum ring visualizer (cached once per song)
   const [decodedEntry, setDecodedEntry] = useState(null);
   const masterAudioSrc = currentJob?.id && currentResults ? getStemSource('master') : '';
+
+  // Full-song in-memory preloader: downloads the entire audio into RAM so playback never stops and seeking is 0ms instant
+  useEffect(() => {
+    if (!masterAudioSrc) {
+      setBlobAudioUrl('');
+      setIsFullyLoaded(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setIsFullyLoaded(false);
+
+    // Fetch the entire audio into memory Blob
+    fetch(masterAudioSrc)
+      .then((r) => {
+        if (!r.ok) throw new Error("Fetch failed");
+        return r.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        const blobUrl = URL.createObjectURL(blob);
+        setBlobAudioUrl(blobUrl);
+        setIsFullyLoaded(true);
+
+        // Seamlessly transfer audio element to local in-memory blob without resetting playhead
+        const el = stemAudiosRef.current['master'];
+        if (el) {
+          const wasPlay = !el.paused && !el.ended;
+          const curTime = el.currentTime || 0;
+          el.src = blobUrl;
+          try { el.currentTime = curTime; } catch (e) {}
+          if (wasPlay) {
+            el.play().catch(() => {});
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn("Could not pre-buffer full song into blob:", err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [masterAudioSrc]);
+
   useEffect(() => {
     if (!masterAudioSrc) return undefined;
     let alive = true;
@@ -1017,7 +1071,7 @@ export default function StudioView({
             stemAudiosRef.current[stemKey] = el;
             if (stemKey === activeTrack) audioRef.current = el;
           }}
-          src={currentJob?.id && currentResults ? getStemSource(stemKey) : undefined}
+          src={stemKey === 'master' && blobAudioUrl ? blobAudioUrl : (currentJob?.id && currentResults ? getStemSource(stemKey) : undefined)}
           preload="auto"
           onTimeUpdate={stemKey === activeTrack ? handleTimeUpdate : undefined}
           onLoadedMetadata={stemKey === activeTrack ? handleTimeUpdate : undefined}
@@ -1468,8 +1522,13 @@ export default function StudioView({
                           className="lyra-range w-full cursor-pointer"
                           style={{ background: `linear-gradient(90deg, #e5a958 ${playPct * 100}%, rgba(255,255,255,0.1) ${playPct * 100}%)` }}
                         />
-                        <div className="mt-1.5 flex justify-between text-[10px] font-mono text-white/40">
+                        <div className="mt-1.5 flex justify-between items-center text-[10px] font-mono text-white/40">
                           <span>{formatTime(playhead)}</span>
+                          {isFullyLoaded && (
+                            <span className="text-[#3fe0c5] flex items-center gap-1 font-mono text-[9px] opacity-80" title="Audio is 100% pre-buffered in browser memory. Instant 0ms seeking.">
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#3fe0c5]" /> 100% Loaded in RAM
+                            </span>
+                          )}
                           {duration > 0 && <span>-{formatTime(Math.max(0, duration - playhead))}</span>}
                         </div>
                       </div>
