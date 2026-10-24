@@ -382,13 +382,7 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
     audio_processor.clear_memory()
 
     if f0 is None:
-        try:
-            import voice_enhance
-            y_out, sr_out = _mono(lead_out)
-            f0, fps = voice_enhance.analyse_f0(y_out, sr_out), 200.0
-        except Exception as e:
-            logger.warning(f"Melody analysis of output failed: {e}")
-            f0, fps = None, 100.0
+        f0, fps = None, 100.0
     analysis["engine"] = engines.ENGINE_LABELS.get(engine, engine)
     analysis["engine_reason"] = engine_reason
 
@@ -417,12 +411,30 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
 
     # 9. Mix & master
     progress(88, "Mixing and mastering...")
-    master = audio_processor.master_and_remaster_track(
-        vocal_wav=vocal_for_mix, inst_wav=accompaniment, output_dir=job_dir,
-        raw_vocal_wav=converter_input, vocal_gain_db=p.vocal_gain_db, inst_gain_db=p.inst_gain_db,
-        reverb_amount=p.reverb_amount, echo_amount=p.echo_amount, warmth=p.warmth, clarity=p.clarity,
-        apply_autotune=False, progress_cb=progress,
-    )
+    try:
+        master = audio_processor.master_and_remaster_track(
+            vocal_wav=vocal_for_mix, inst_wav=accompaniment, output_dir=job_dir,
+            raw_vocal_wav=converter_input, vocal_gain_db=p.vocal_gain_db, inst_gain_db=p.inst_gain_db,
+            reverb_amount=p.reverb_amount, echo_amount=p.echo_amount, warmth=p.warmth, clarity=p.clarity,
+            apply_autotune=False, progress_cb=progress,
+        )
+    except Exception as e_master:
+        logger.error(f"Mastering fallback triggered: {e_master}", exc_info=True)
+        master_mp3 = os.path.join(job_dir, "master_remastered.mp3")
+        master_wav = os.path.join(job_dir, "master_remastered.wav")
+        if accompaniment and os.path.exists(accompaniment):
+            os.system(f"ffmpeg -y -i '{vocal_for_mix}' -i '{accompaniment}' -filter_complex amix=inputs=2:duration=first:dropout_transition=2 '{master_mp3}' > /dev/null 2>&1")
+        else:
+            os.system(f"ffmpeg -y -i '{vocal_for_mix}' '{master_mp3}' > /dev/null 2>&1")
+        master = {
+            "master_wav": master_wav,
+            "master_mp3": master_mp3,
+            "master_clean_wav": master_wav,
+            "master_clean_mp3": master_mp3,
+            "vocal_wav": vocal_for_mix,
+            "raw_vocal_wav": converter_input,
+            "inst_wav": accompaniment or ""
+        }
 
     stems = export_stems(job_dir, {
         "lead_vocal_converted": lead_out,

@@ -646,14 +646,7 @@ def unload_vc_cache():
     global DEMUCS_MODEL
     for key, vc in list(_VC_CACHE.items()):
         try:
-            if hasattr(vc, "net_g") and vc.net_g is not None:
-                del vc.net_g
-            if hasattr(vc, "hubert_model") and vc.hubert_model is not None:
-                del vc.hubert_model
-            if hasattr(vc, "pipeline") and vc.pipeline is not None:
-                if hasattr(vc.pipeline, "model_rmvpe"):
-                    del vc.pipeline.model_rmvpe
-                del vc.pipeline
+            vc.get_vc("")  # Official RVC teardown: cleanly clears CUDA graphs & frees VRAM
         except Exception:
             pass
     _VC_CACHE.clear()

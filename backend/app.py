@@ -206,8 +206,10 @@ class JobCancelledError(BaseException):
     """Raised to immediately abort a running job thread when cancelled by the user."""
     pass
 
-# Support multiple users converting at the same time without lag (configurable, default 4)
-MAX_CONCURRENT_WORKERS = int(os.environ.get("LYRA_MAX_WORKERS", "4"))
+# Guard against VRAM/RAM exhaustion on Colab (15GB VRAM / 12.7GB RAM): 
+# Limit active GPU syntheses to 1 on constrained environments to prevent fatal 502 OOM crashes,
+# while allowing multi-job queueing so next songs start instantly when prior songs finish or cancel.
+MAX_CONCURRENT_WORKERS = int(os.environ.get("LYRA_MAX_WORKERS", "1" if (resources.LITE or resources.ram_gb() <= 16.5) else "3"))
 JOB_EXECUTOR = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_WORKERS, thread_name_prefix="lyra-job",
                                   initializer=resources.apply_worker_limits)
 
