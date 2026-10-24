@@ -31,6 +31,7 @@ import soundfile as sf
 import audio_processor
 import engines
 import melody
+import resources
 import separation
 
 logger = logging.getLogger(__name__)
