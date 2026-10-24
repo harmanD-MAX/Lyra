@@ -692,16 +692,21 @@ export default function LandingPage({ onLaunchStudio }) {
             ))}
             <Reveal delay={300}>
               <TiltCard className="h-[420px] border border-cyan-500/30" glow={TEAL} onClick={() => launch(undefined, { mode: 'convert' })}>
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,rgba(63,224,197,0.12),transparent_60%)]" />
-                <Glyph3D kind="render" className="absolute inset-x-0 top-6 h-56 opacity-90" />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_25%,rgba(63,224,197,0.12),transparent_60%)]" />
                 <div className="relative h-full p-6 flex flex-col">
-                  <div className="pulse-ring w-14 h-14 rounded-full grid place-items-center border border-cyan-400/50 mx-auto mt-24 bg-black/50 backdrop-blur">
-                    <Cpu className="w-6 h-6" style={{ color: TEAL }} />
+                  {/* graphic gets its own space above the text */}
+                  <div className="relative h-48 shrink-0 -mx-6">
+                    <Glyph3D kind="render" zoom={1.1} className="absolute inset-0 opacity-90" />
+                    <div className="absolute inset-0 grid place-items-center">
+                      <div className="pulse-ring w-12 h-12 rounded-full grid place-items-center border border-cyan-400/50 bg-black/60 backdrop-blur">
+                        <Cpu className="w-5 h-5" style={{ color: TEAL }} />
+                      </div>
+                    </div>
                   </div>
-                  <div className="mt-auto">
+                  <div className="mt-auto pt-6">
                     <h3 className="text-2xl font-bold" style={{ fontFamily: "var(--font-display)" }}>Dual AI Engines</h3>
-                    <p className="text-sm mt-1" style={{ color: TEAL }}>RVC v2 (48 kHz) • Seed-VC (44.1 kHz DiT)</p>
-                    <p className="text-sm text-white/55 mt-3">Choose either RVC or Seed-VC for all 3 singers. Seamless zero-shot conversion with built-in pitch fixing.</p>
+                    <p className="text-sm mt-1" style={{ color: TEAL }}>RVC v2 · Seed-VC</p>
+                    <p className="text-sm text-white/55 mt-3">Choose RVC or Seed-VC for any singer, with built-in pitch fixing.</p>
                     <span className="mt-5 inline-flex items-center gap-1.5 text-sm text-white/80 group-hover:gap-3 transition-all">Launch Studio Converter <ArrowRight className="w-4 h-4" /></span>
                   </div>
                 </div>
