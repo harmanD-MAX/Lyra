@@ -24,9 +24,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TOOLS_DIR = os.path.join(BASE_DIR, "tools")
 SEPARATION_MODELS_DIR = os.environ.get("LYRA_SEPARATION_MODELS", os.path.join(BASE_DIR, "models", "separation"))
 
-VOCAL_MODEL = os.environ.get("LYRA_VOCAL_MODEL", "mel_band_roformer_vocals_fv4_gabox")
-KARAOKE_MODEL = os.environ.get("LYRA_KARAOKE_MODEL", "mel_band_roformer_karaoke_gabox_v2")
-DEREVERB_MODEL = os.environ.get("LYRA_DEREVERB_MODEL", "dereverb_mel_band_roformer_less_aggressive_anvuew_sdr_18.8050")
+import resources
+
+_DEFAULTS = resources.SEPARATION_MODELS[resources.PROFILE]
+VOCAL_MODEL = os.environ.get("LYRA_VOCAL_MODEL", _DEFAULTS["vocals"])
+KARAOKE_MODEL = os.environ.get("LYRA_KARAOKE_MODEL", _DEFAULTS["karaoke"])
+DEREVERB_MODEL = os.environ.get("LYRA_DEREVERB_MODEL", _DEFAULTS["dereverb"])
 DOWNLOAD_SOURCE = os.environ.get("LYRA_MODEL_SOURCE", "huggingface")
 
 STEM_SR = 44100
@@ -62,13 +65,25 @@ def _run_model(model_name: str, mix_cf: np.ndarray, progress_cb=None, label: str
     os.makedirs(SEPARATION_MODELS_DIR, exist_ok=True)
     if progress_cb and label:
         progress_cb(None, label)
+    # Never fill the disk with a model download
+    entry = pymss.get_model_entry(model_name)
+    try:
+        pymss.resolve_model(model_name, model_dir=SEPARATION_MODELS_DIR, require_supported=True, require_exists=True)
+        downloaded = True
+    except Exception:
+        downloaded = False
+    if not downloaded and not resources.has_room_for(int(entry.size_bytes or 0), f"separation model {model_name}"):
+        raise RuntimeError(f"Not enough free disk space to download {model_name}")
+    params = {"normalize": False}
+    if resources.LITE:
+        params["batch_size"] = 1  # lower peak memory
     sep = pymss.MSSeparator.from_model_name(
         model_name,
         model_dir=SEPARATION_MODELS_DIR,
-        download=True,
+        download=not downloaded,
         source=DOWNLOAD_SOURCE,
         device="auto",
-        inference_params={"normalize": False},
+        inference_params=params,
     )
     try:
         results = sep.separate(mix_cf, pbar=False)

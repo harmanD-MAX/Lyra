@@ -8,7 +8,7 @@ so the corrected melody can be rendered back in the user's *own* timbre:
 steady, in tune and free of voice cracks.
 
 Stages:
-    1. preprocess  - resample to 40k, high-pass, slice on silence into ~3.5s clips
+    1. preprocess  - resample to 40k/48k, high-pass, slice on silence into ~3.5s clips
     2. features    - HuBERT/ContentVec v2 features + RMVPE F0 for every clip
     3. train       - GAN fine-tune (mel L1 + KL + feature matching + adversarial)
     4. export      - small inference checkpoint + FAISS retrieval index
@@ -32,9 +32,18 @@ logger = logging.getLogger(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PRETRAINED_DIR = os.path.join(BASE_DIR, "assets", "pretrained_v2")
 PRETRAINED_URL = "https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/pretrained_v2/{name}"
-CONFIG_PATH = os.path.join(BASE_DIR, "configs", "v2", "40k.json")
+SR = 40000  # default; 48000 for the "best" preset
 
-SR = 40000
+# Training presets shown in the Voice Lab
+PRESETS = {
+    "quick": {"steps": 1000, "sample_rate": 40000, "seedvc_steps": 0},
+    "standard": {"steps": 2000, "sample_rate": 40000, "seedvc_steps": 0},
+    "best": {"steps": 4000, "sample_rate": 48000, "seedvc_steps": 600},
+}
+
+
+def _config_path(sample_rate: int) -> str:
+    return os.path.join(BASE_DIR, "configs", "v2", f"{sample_rate // 1000}k.json")
 SLICE_SEC = 3.5
 OVERLAP_SEC = 0.3
 
@@ -48,8 +57,8 @@ def _device():
     return torch.device("cpu")
 
 
-def _load_config() -> dict:
-    with open(CONFIG_PATH) as f:
+def _load_config(sample_rate: int = SR) -> dict:
+    with open(_config_path(sample_rate)) as f:
         return json.load(f)
 
 
@@ -57,25 +66,25 @@ def _load_config() -> dict:
 # 1. Preprocess
 # ---------------------------------------------------------------------------
 
-def preprocess(audio_paths: List[str], min_total_sec: float = 30.0) -> List[np.ndarray]:
+def preprocess(audio_paths: List[str], min_total_sec: float = 30.0, sr: int = SR) -> List[np.ndarray]:
     """Load recordings, clean, and slice into training clips at 40 kHz."""
     import librosa
     from scipy import signal
 
-    b, a = signal.butter(N=5, Wn=48, btype="high", fs=SR)
+    b, a = signal.butter(N=5, Wn=48, btype="high", fs=sr)
     clips = []
     total = 0.0
     for path in audio_paths:
-        y, _ = librosa.load(path, sr=SR, mono=True)
+        y, _ = librosa.load(path, sr=sr, mono=True)
         y = signal.lfilter(b, a, y).astype(np.float32)
         for s, e in librosa.effects.split(y, top_db=40, frame_length=2048, hop_length=512):
             seg = y[s:e]
-            if len(seg) < SR * 0.6:
+            if len(seg) < sr * 0.6:
                 continue
-            step = int(SR * (SLICE_SEC - OVERLAP_SEC))
+            step = int(sr * (SLICE_SEC - OVERLAP_SEC))
             for start in range(0, len(seg), step):
-                clip = seg[start: start + int(SR * SLICE_SEC)]
-                if len(clip) < SR * 0.6:
+                clip = seg[start: start + int(sr * SLICE_SEC)]
+                if len(clip) < sr * 0.6:
                     continue
                 peak = np.abs(clip).max()
                 if peak < 1e-3:
@@ -83,7 +92,7 @@ def preprocess(audio_paths: List[str], min_total_sec: float = 30.0) -> List[np.n
                 # Same loudness handling as RVC preprocessing
                 clip = (clip / peak * 0.9 * 0.75 + 0.25 * clip).astype(np.float32)
                 clips.append(clip)
-                total += len(clip) / SR
+                total += len(clip) / sr
     if total < min_total_sec:
         raise ValueError(f"Only {total:.0f}s of usable voice found; record at least {min_total_sec:.0f}s (10+ minutes is ideal).")
     logger.info(f"Preprocessed {len(clips)} clips ({total / 60:.1f} min)")
@@ -94,7 +103,8 @@ def preprocess(audio_paths: List[str], min_total_sec: float = 30.0) -> List[np.n
 # 2. Features
 # ---------------------------------------------------------------------------
 
-def extract_features(clips: List[np.ndarray], progress: Callable[[float], None] = lambda p: None) -> List[dict]:
+def extract_features(clips: List[np.ndarray], progress: Callable[[float], None] = lambda p: None,
+                     sr: int = SR) -> List[dict]:
     """HuBERT v2 features (upsampled to 100 fps) + RMVPE F0 per clip."""
     import librosa
     import torch
@@ -111,7 +121,7 @@ def extract_features(clips: List[np.ndarray], progress: Callable[[float], None] 
 
     items = []
     for i, clip in enumerate(clips):
-        y16 = librosa.resample(clip, orig_sr=SR, target_sr=16000)
+        y16 = librosa.resample(clip, orig_sr=sr, target_sr=16000)
         with torch.no_grad():
             x = torch.from_numpy(y16).float().view(1, -1).to(config.device)
             if config.is_half:
@@ -119,11 +129,12 @@ def extract_features(clips: List[np.ndarray], progress: Callable[[float], None] 
             feats = extract_hubert_features(hubert, x, "v2")[0].float().cpu().numpy()
         feats = np.repeat(feats, 2, axis=0)  # 50 fps -> 100 fps, as at inference
         f0 = rmvpe.infer_from_audio(y16, thred=0.03).astype(np.float32)
-        n_frames = min(len(feats), len(f0), len(clip) // 400)
+        hop = sr // 100
+        n_frames = min(len(feats), len(f0), len(clip) // hop)
         if n_frames < 40:
             continue
         items.append({
-            "wav": clip[: n_frames * 400],
+            "wav": clip[: n_frames * hop],
             "phone": feats[:n_frames].astype(np.float32),
             "pitchf": f0[:n_frames],
             "pitch": coarse_f0_from_pitchf(f0[:n_frames]).astype(np.int64),
@@ -207,6 +218,7 @@ def _kl_loss(z_p, logs_q, m_p, logs_p, z_mask):
 
 
 def build_models(cfg: dict, device, use_pretrained: bool = True):
+    sr_tag = f"{cfg['data']['sampling_rate'] // 1000}k"
     import torch
     from infer.module.models import MultiPeriodDiscriminatorV2, SynthesizerTrnMs768NSFsid
 
@@ -222,7 +234,7 @@ def build_models(cfg: dict, device, use_pretrained: bool = True):
     ).to(device)
     net_d = MultiPeriodDiscriminatorV2(m["use_spectral_norm"]).to(device)
     if use_pretrained:
-        for net, name in ((net_g, "f0G40k.pth"), (net_d, "f0D40k.pth")):
+        for net, name in ((net_g, f"f0G{sr_tag}.pth"), (net_d, f"f0D{sr_tag}.pth")):
             path = _download_pretrained(name)
             if path:
                 sd = torch.load(path, map_location="cpu")
@@ -233,13 +245,14 @@ def build_models(cfg: dict, device, use_pretrained: bool = True):
 
 
 def train(items: List[dict], steps: int = 2000, batch_size: int = 4, use_pretrained: bool = True,
-          progress: Callable[[float, dict], None] = lambda p, info: None, seed: int = 1234):
+          progress: Callable[[float, dict], None] = lambda p, info: None, seed: int = 1234,
+          sample_rate: int = SR):
     import torch
     from infer.module import commons
 
     random.seed(seed)
     torch.manual_seed(seed)
-    cfg = _load_config()
+    cfg = _load_config(sample_rate)
     device = _device()
     hop = cfg["data"]["hop_length"]
     seg_frames = cfg["train"]["segment_size"] // hop
@@ -329,14 +342,14 @@ def export_checkpoint(net_g, cfg: dict, path: str, name: str) -> str:
     ckpt = {
         "weight": weights,
         "config": [
-            d["filter_length"] // 2 + 1, 32, m["inter_channels"], m["hidden_channels"], m["filter_channels"],
+            d["filter_length"] // 2 + 1, cfg["train"]["segment_size"] // d["hop_length"], m["inter_channels"], m["hidden_channels"], m["filter_channels"],
             m["n_heads"], m["n_layers"], m["kernel_size"], m["p_dropout"], m["resblock"],
             m["resblock_kernel_sizes"], m["resblock_dilation_sizes"], m["upsample_rates"],
             m["upsample_initial_channel"], m["upsample_kernel_sizes"], m["spk_embed_dim"],
             m["gin_channels"], d["sampling_rate"],
         ],
         "info": f"Lyra personal voice: {name}",
-        "sr": "40k",
+        "sr": f"{d['sampling_rate'] // 1000}k",
         "f0": 1,
         "version": "v2",
     }
@@ -362,10 +375,24 @@ def build_index(items: List[dict], path: str) -> Optional[str]:
     return path
 
 
-def train_personal_voice(voice_id: str, audio_paths: List[str], steps: int = 2000,
-                         progress_cb: Optional[Callable[[int, str], None]] = None) -> dict:
-    """End-to-end training job. Updates the voice's meta.json as it goes."""
+def train_personal_voice(voice_id: str, audio_paths: List[str], steps: Optional[int] = None,
+                         progress_cb: Optional[Callable[[int, str], None]] = None,
+                         preset: str = "standard") -> dict:
+    """
+    End-to-end training job. Updates the voice's meta.json as it goes.
+
+    Every preset trains an RVC v2 model and builds a Seed-VC reference clip
+    from your recordings (so both engines can sing as you). "best" trains at
+    48 kHz and, when Seed-VC is installed, also fine-tunes Seed-VC on you.
+    """
+    import engines
+    import soundfile as sf
     import voices
+
+    cfg_preset = dict(PRESETS.get(preset, PRESETS["standard"]))
+    if steps:
+        cfg_preset["steps"] = int(steps)
+    sr = cfg_preset["sample_rate"]
 
     def report(pct: float, msg: str):
         voices.update_meta(voice_id, progress=int(pct), message=msg, status="training")
@@ -374,23 +401,53 @@ def train_personal_voice(voice_id: str, audio_paths: List[str], steps: int = 200
 
     vdir = os.path.join(voices.CUSTOM_ROOT, voice_id)
     meta = voices.read_meta(voice_id) or {}
+    model_info = {"id": voice_id, "name": meta.get("name", voice_id), "dir": vdir}
     try:
         report(2, "Cleaning and slicing your recordings...")
-        clips = preprocess(audio_paths)
+        clips = preprocess(audio_paths, sr=sr)
+        report(5, "Building your Seed-VC reference clip...")
+        engines.build_reference(audio_paths, engines.reference_path(model_info))
         report(8, f"Analysing {len(clips)} clips (voice features + pitch)...")
-        items = extract_features(clips, progress=lambda p: report(8 + 17 * p, "Analysing your voice..."))
-        report(25, "Training your personal voice model...")
+        items = extract_features(clips, progress=lambda p: report(8 + 15 * p, "Analysing your voice..."), sr=sr)
+        rvc_span = 70 if cfg_preset["seedvc_steps"] and engines.seedvc_available() else 72
+        report(23, f"Training your RVC v2 {sr // 1000} kHz voice model...")
         net_g, cfg = train(
-            items, steps=steps,
+            items, steps=cfg_preset["steps"], sample_rate=sr,
             progress=lambda p, info: report(
-                25 + 70 * p, f"Training step {info['step']}/{steps} (mel loss {info['loss_mel']:.2f})"
+                23 + rvc_span * p * (0.75 if rvc_span == 70 else 1.0),
+                f"Training step {info['step']}/{cfg_preset['steps']} (mel loss {info['loss_mel']:.2f})"
             ),
         )
-        report(96, "Exporting model and building retrieval index...")
         export_checkpoint(net_g, cfg, os.path.join(vdir, "model.pth"), meta.get("name", voice_id))
         build_index(items, os.path.join(vdir, "model.index"))
-        voices.update_meta(voice_id, status="ready", progress=100, message="Your voice model is ready!",
-                           trained_minutes=round(sum(len(c) for c in clips) / SR / 60, 1), steps=steps)
+        del net_g
+
+        seedvc_ft = None
+        if cfg_preset["seedvc_steps"] and engines.seedvc_available():
+            report(78, "Fine-tuning Seed-VC singing model on your voice...")
+            clip_dir = os.path.join(vdir, "_clips")
+            os.makedirs(clip_dir, exist_ok=True)
+            clip_paths = []
+            for i, c in enumerate(clips):
+                cp = os.path.join(clip_dir, f"{i:04d}.wav")
+                sf.write(cp, c, sr)
+                clip_paths.append(cp)
+            seedvc_ft = engines.finetune_seedvc(clip_paths, model_info, steps=cfg_preset["seedvc_steps"])
+            import shutil
+            shutil.rmtree(clip_dir, ignore_errors=True)
+
+        report(97, "Finishing up...")
+        import resources
+        if resources.LITE:
+            # The model, index and reference are saved; raw takes are no longer needed
+            import shutil as _sh
+            _sh.rmtree(os.path.join(vdir, "recordings"), ignore_errors=True)
+        voices.update_meta(
+            voice_id, status="ready", progress=100, message="Your voice model is ready!",
+            trained_minutes=round(sum(len(c) for c in clips) / sr / 60, 1),
+            steps=cfg_preset["steps"], preset=preset, sample_rate=sr,
+            seedvc_finetuned=bool(seedvc_ft),
+        )
         return voices.read_meta(voice_id)
     except Exception as e:
         logger.error(f"Voice training failed: {e}", exc_info=True)

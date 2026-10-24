@@ -42,6 +42,7 @@ export const DEFAULT_CREATIVE = {
   splitBacking: true,
   dereverb: true,
   alignTiming: true,
+  engine: 'auto',             // auto | seedvc | rvc
 };
 
 /** The settings actually sent to the backend. */
@@ -56,6 +57,7 @@ export function resolveCreative(c) {
       splitBacking: true,
       dereverb: true,
       alignTiming: true,
+      engine: 'auto',
     };
   }
   return {
@@ -69,6 +71,7 @@ export function resolveCreative(c) {
     splitBacking: c.splitBacking,
     dereverb: c.dereverb,
     alignTiming: c.alignTiming,
+    engine: c.engine,
   };
 }
 

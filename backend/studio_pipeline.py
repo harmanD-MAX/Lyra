@@ -29,6 +29,7 @@ import numpy as np
 import soundfile as sf
 
 import audio_processor
+import engines
 import melody
 import separation
 
@@ -44,6 +45,7 @@ class JobParams:
     file_path: Optional[str] = None
     url: Optional[str] = None
     model_name: str = "arijit_singh"       # singer id, personal voice id, or "raw"
+    engine: str = "auto"                   # auto | rvc | seedvc (see engines.py)
     pitch_shift: int = 0
     f0_method: str = "rmvpe"
     index_rate: Optional[float] = None
@@ -194,9 +196,81 @@ def export_stems(job_dir: str, stems: dict) -> dict:
         if path and os.path.exists(path):
             dest = os.path.join(out_dir, f"{name}.wav")
             if os.path.abspath(path) != os.path.abspath(dest):
-                shutil.copyfile(path, dest)
+                if os.path.exists(dest):
+                    os.remove(dest)
+                try:
+                    os.link(path, dest)  # same bytes on disk, no extra space
+                except OSError:
+                    shutil.copyfile(path, dest)
             out[name] = f"{name}.wav"
     return out
+
+
+# ---------------------------------------------------------------------------
+# rendering
+# ---------------------------------------------------------------------------
+
+def _world_retune(src: str, out: str, pitch_options: Optional[dict], key, strength: float,
+                  guide_lead: Optional[str], shift: int, harmony_degrees: int = 0,
+                  retune_ms: float = 40.0, vibrato: float = 0.0, progress=None) -> dict:
+    """Correct the melody of `src` and re-synthesize it in the same voice (WORLD)."""
+    import voice_enhance
+    guide_f0 = None
+    if pitch_options and pitch_options.get("mode") == "guide" and guide_lead:
+        gy, gsr = _mono(guide_lead)
+        guide_f0 = voice_enhance.analyse_f0(gy, gsr)
+
+    def correct(f0_in, fps_in):
+        f0_out = f0_in * (2 ** (shift / 12.0))
+        if pitch_options:
+            if guide_f0 is not None:
+                g = guide_f0 * (2 ** (shift / 12.0))
+                g = np.pad(g, (0, max(0, len(f0_out) - len(g))))[: len(f0_out)]
+                f0_out = melody.align_to_guide(f0_out, g, fps=fps_in, strength=strength, key=key,
+                                               use_dtw=pitch_options.get("guide_dtw", False), retune_ms=retune_ms)
+            else:
+                f0_out = melody.correct_pitch(f0_out, fps=fps_in, key=key, strength=strength, retune_ms=retune_ms,
+                                              steadiness=pitch_options.get("steadiness", 0.5), vibrato=vibrato)
+        if harmony_degrees:
+            f0_out = melody.harmony_f0(f0_out, fps=fps_in, key=key, degrees=harmony_degrees)
+        return f0_out
+
+    return voice_enhance.retune_world(src, out, correct, progress_cb=progress)
+
+
+def _render(source: str, out_name: str, job_dir: str, p: "JobParams", model_info: dict, engine: str,
+            pitch_options: Optional[dict], key, strength: float, guide_lead: Optional[str],
+            harmony_degrees: int = 0, progress=None) -> dict:
+    """Render `source` in the target voice with the chosen engine. Returns {path, f0, fps, engine}."""
+    out = os.path.join(job_dir, out_name)
+    if engine == "seedvc":
+        try:
+            src, f0, fps = source, None, 100.0
+            if pitch_options or harmony_degrees:
+                # Seed-VC follows the source melody, so correct it first (same voice, WORLD)
+                tuned = os.path.join(job_dir, out_name.replace(".wav", "_tuned_source.wav"))
+                r = _world_retune(source, tuned, pitch_options, key, strength, guide_lead, 0, harmony_degrees,
+                                  p.retune_ms, p.vibrato, progress)
+                src, f0, fps = tuned, r["f0"] * (2 ** (p.pitch_shift / 12.0)), r["fps"]
+            engines.convert_seedvc(src, model_info, out, semitones=p.pitch_shift, progress_cb=progress)
+            return {"path": out, "f0": f0, "fps": fps, "engine": "seedvc"}
+        except Exception as e:
+            logger.warning(f"Seed-VC render failed, falling back to RVC: {e}")
+            if progress:
+                progress(74, "Seed-VC unavailable for this render; using RVC v2...")
+
+    opts = dict(pitch_options) if pitch_options else None
+    if harmony_degrees:
+        opts = dict(opts or {"mode": "off"})
+        opts["harmony_degrees"] = harmony_degrees
+        opts["key"] = key
+    r = audio_processor.convert_voice(
+        vocal_path=source, output_dir=job_dir, model_name=p.model_name,
+        pitch_shift=p.pitch_shift, f0_method=p.f0_method, index_rate=p.index_rate,
+        protect=p.protect, style_strength=p.style_strength, pitch_options=opts,
+        output_name=out_name, progress_cb=progress,
+    )
+    return {"path": r["path"], "f0": r["f0"], "fps": r["fps"], "engine": "rvc" if r["engine"] == "rvc" else r["engine"]}
 
 
 # ---------------------------------------------------------------------------
@@ -280,54 +354,38 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
     analysis["correction_strength"] = round(strength, 2) if pitch_options else 0.0
 
     # 6. Render the lead
-    f0, fps = None, 100.0
     lead_out = os.path.join(job_dir, "converted_vocals.wav")
     if is_raw:
-        import voice_enhance
-        guide_f0 = None
-        if pitch_options and pitch_mode == "guide" and guide_lead:
-            gy, gsr = _mono(guide_lead)
-            guide_f0 = voice_enhance.analyse_f0(gy, gsr)
-
-        def correct(f0_in, fps_in):
-            if not pitch_options:
-                return f0_in
-            shifted = f0_in * (2 ** (p.pitch_shift / 12.0))
-            if guide_f0 is not None:
-                g = guide_f0 * (2 ** (p.pitch_shift / 12.0))
-                g = np.pad(g, (0, max(0, len(shifted) - len(g))))[: len(shifted)]
-                return melody.align_to_guide(shifted, g, fps=fps_in, strength=strength, key=key,
-                                             use_dtw=pitch_options["guide_dtw"], retune_ms=p.retune_ms)
-            return melody.correct_pitch(shifted, fps=fps_in, key=key, strength=strength, retune_ms=p.retune_ms,
-                                        steadiness=pitch_options["steadiness"], vibrato=p.vibrato)
-
-        r = voice_enhance.retune_world(converter_input, lead_out, correct, progress_cb=progress)
+        engine, engine_reason = "world", "keep your own voice"
+        r = _world_retune(converter_input, lead_out, pitch_options, key, strength, guide_lead, p.pitch_shift,
+                          retune_ms=p.retune_ms, vibrato=p.vibrato, progress=progress)
         f0, fps = r["f0"], r["fps"]
-        engine = "world"
     else:
-        r = audio_processor.convert_voice(
-            vocal_path=converter_input, output_dir=job_dir, model_name=p.model_name,
-            pitch_shift=p.pitch_shift, f0_method=p.f0_method, index_rate=p.index_rate,
-            protect=p.protect, style_strength=p.style_strength, pitch_options=pitch_options,
-            output_name="converted_vocals.wav", progress_cb=progress,
-        )
+        engine, engine_reason = engines.choose_engine(model_info, p.engine)
+        progress(64, f"Voice engine: {engines.ENGINE_LABELS.get(engine, engine)} ({engine_reason})")
+        r = _render(converter_input, "converted_vocals.wav", job_dir, p, model_info, engine,
+                    pitch_options, key, strength, guide_lead, progress=progress)
+        if r["engine"] != engine:
+            engine_reason = f"fell back from {engine}"
         f0, fps, engine = r["f0"], r["fps"], r["engine"]
+    if f0 is None:
+        try:
+            import voice_enhance
+            y_out, sr_out = _mono(lead_out)
+            f0, fps = voice_enhance.analyse_f0(y_out, sr_out), 200.0
+        except Exception as e:
+            logger.warning(f"Melody analysis of output failed: {e}")
+    analysis["engine"] = engines.ENGINE_LABELS.get(engine, engine)
+    analysis["engine_reason"] = engine_reason
 
     # 7. Harmony voice
     harmony_path = None
     degrees = HARMONY_DEGREES.get(p.harmony, 0)
     if degrees and not is_raw:
         progress(86, "Singing a harmony line in key...")
-        h_opts = dict(pitch_options or {"mode": "off"})
-        h_opts["harmony_degrees"] = degrees
-        h_opts["key"] = key
-        hr = audio_processor.convert_voice(
-            vocal_path=converter_input, output_dir=job_dir, model_name=p.model_name,
-            pitch_shift=p.pitch_shift, f0_method=p.f0_method, index_rate=p.index_rate,
-            protect=p.protect, style_strength=p.style_strength, pitch_options=h_opts,
-            output_name="harmony_vocals.wav",
-        )
-        harmony_path = hr["path"]
+        harmony_path = _render(converter_input, "harmony_vocals.wav", job_dir, p, model_info,
+                               "seedvc" if engine == "seedvc" else "rvc",
+                               pitch_options, key, strength, guide_lead, harmony_degrees=degrees)["path"]
 
     vocal_for_mix = lead_out
     if harmony_path:
@@ -368,6 +426,8 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
         "key": list(key) if key else None,
         "pitch_options": {k: v for k, v in (pitch_options or {}).items() if k != "key"} or None,
         "engine": engine,
+        "engine_reason": engine_reason,
+        "strength": strength,
         "separation_engine": sep["engine"],
     }
     with open(os.path.join(job_dir, "pipeline_state.json"), "w") as f:
@@ -382,6 +442,8 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
         "stems": stems,
         "midi": bool(midi_file),
         "engine": engine,
+        "engine_label": engines.ENGINE_LABELS.get(engine, engine),
+        "engine_reason": engine_reason,
         "separation_engine": sep["engine"],
         "master": master,
     }
@@ -418,11 +480,12 @@ def rerender_section(job_dir: str, start: float, end: float, overrides: dict,
             pitch_options["guide_audio_path"] = gseg
 
     progress(30, f"Re-rendering {start:.1f}s - {end:.1f}s...")
-    r = audio_processor.convert_voice(
-        vocal_path=seg_path, output_dir=job_dir, model_name=p.model_name, pitch_shift=p.pitch_shift,
-        f0_method=p.f0_method, index_rate=p.index_rate, protect=p.protect, style_strength=p.style_strength,
-        pitch_options=pitch_options, output_name="_section_out.wav",
-    )
+    model_info = audio_processor.resolve_model_info(p.model_name)
+    engine = state.get("engine", "rvc")
+    r = _render(seg_path, "_section_out.wav", job_dir, p, model_info, "seedvc" if engine == "seedvc" else "rvc",
+                pitch_options, pitch_options.get("key") if pitch_options else None,
+                float(pitch_options.get("strength", 0.0)) if pitch_options else 0.0,
+                pitch_options.get("guide_audio_path") if pitch_options else None)
     # Trim the context padding off the rendered section
     out, osr = sf.read(r["path"], always_2d=True)
     lead_pad = (start - s0 / sr)
@@ -444,7 +507,8 @@ def rerender_section(job_dir: str, start: float, end: float, overrides: dict,
         apply_autotune=False,
     )
     export_stems(job_dir, {"lead_vocal_converted": lead})
-    for tmp in ("_section_in.wav", "_section_out.wav", "_section_trimmed.wav", "_section_guide.wav"):
+    for tmp in ("_section_in.wav", "_section_out.wav", "_section_trimmed.wav", "_section_guide.wav",
+                "_section_out_tuned_source.wav"):
         try:
             os.remove(os.path.join(job_dir, tmp))
         except Exception:

@@ -212,6 +212,7 @@ export default function App() {
 
     formData.append('mode', c.studioMode);
     formData.append('model_name', selectedModel);
+    formData.append('engine', r.engine);
     formData.append('pitch_shift', 0);
     formData.append('style_strength', 1.0);
     formData.append('f0_method', 'rmvpe');
