@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import ProcessingStatus from './ProcessingStatus';
 import ComposerTools from './ComposerTools';
+import VoiceLab from './VoiceLab';
 
 export default function StudioView({
   selectedModel,
@@ -59,6 +60,8 @@ export default function StudioView({
 
   // Input method tabs in the Ingestion Dock: 'file' | 'spotify' | 'youtube' | 'record'
   const [ingestMethod, setIngestMethod] = useState('file');
+  // High-level distinct song creation option: 'cover' (Neural AI Cover) | 'sang_by_me' (I Sang / Vocal Take)
+  const [creationCategory, setCreationCategory] = useState(mode === 'record' || mode === 'my_voice' ? 'sang_by_me' : 'cover');
 
   // Active playing audio track: 'master' | 'vocal_arijit' | 'instrumental' | 'vocal_original'
   const [activeTrack, setActiveTrack] = useState('master');
@@ -890,6 +893,21 @@ export default function StudioView({
                 </span>
               )}
             </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('voicelab')}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-all cursor-pointer ${activeTab === 'voicelab'
+                  ? 'bg-[#e5a958]/15 text-[#e5a958] font-semibold border border-[#e5a958]/30 shadow-sm'
+                  : 'hover:bg-white/5 hover:text-white'
+                }`}
+            >
+              <div className="flex items-center gap-3">
+                <Sparkles className="w-4 h-4 text-[#e5a958]" />
+                <span>Voice Training Lab</span>
+              </div>
+              <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-[#e5a958]/10 text-[#e5a958]">Full Page</span>
+            </button>
           </nav>
 
           {/* Vocalist Personas Switcher */}
@@ -926,10 +944,11 @@ export default function StudioView({
               ))}
               <button
                 type="button"
-                onClick={onOpenVoiceLab}
-                className="w-full text-left p-2.5 rounded-xl border border-dashed border-[#e5a958]/40 text-xs text-[#e5a958] hover:bg-[#e5a958]/10 transition-all cursor-pointer"
+                onClick={() => setActiveTab('voicelab')}
+                className="w-full text-left p-2.5 rounded-xl border border-dashed border-[#e5a958]/40 text-xs text-[#e5a958] hover:bg-[#e5a958]/10 transition-all cursor-pointer flex items-center justify-between"
               >
-                + Voice Lab: train your own voice
+                <span>+ Train Voice (Full Page)</span>
+                <span className="text-[10px] font-mono">Open Lab →</span>
               </button>
             </div>
           </div>
@@ -1149,6 +1168,21 @@ export default function StudioView({
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* =====================================================================
+              TAB: VOICE TRAINING LAB (Dedicated Full-Page View)
+             ===================================================================== */}
+          {activeTab === 'voicelab' && (
+            <div className="max-w-6xl w-full mx-auto px-2 sm:px-4 animate-fadeIn">
+              <VoiceLab
+                embedded={true}
+                open={true}
+                onClose={() => setActiveTab('studio')}
+                voices={personalVoices}
+                onVoicesChanged={onOpenVoiceLab}
+              />
             </div>
           )}
 
@@ -1652,10 +1686,16 @@ export default function StudioView({
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-white/10 flex-shrink-0">
                     <div className="space-y-0.5">
                       <h3 className="text-2xl sm:text-3xl font-bold text-white pb-1 leading-tight overflow-visible" style={{ fontFamily: "var(--font-display)" }}>
-                        Bring in a <span className="font-accent text-[#e5a958] pr-1">song</span> or a take
+                        {creationCategory === 'sang_by_me' ? (
+                          <>Your <span className="font-accent text-[#e5a958] pr-1">Vocal Take</span> & Pitch Engine</>
+                        ) : (
+                          <>Neural <span className="font-accent text-[#3fe0c5] pr-1">AI Song Cover</span> Studio</>
+                        )}
                       </h3>
                       <p className="text-xs sm:text-sm text-white/60">
-                        Upload a file, paste a Spotify or YouTube link, or record yourself right here.
+                        {creationCategory === 'sang_by_me'
+                          ? 'You sang the vocals. Lyra fixes pitch, cleans room echo, and masters your voice or applies a model.'
+                          : 'Bring in any full song. Lyra separates stems with RoFormer v2 and resings lead vocals.'}
                       </p>
                     </div>
 
@@ -1667,14 +1707,82 @@ export default function StudioView({
                     </div>
                   </div>
 
-                  {/* 4 Ingestion Method Tabs */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white/[0.035] p-1.5 rounded-2xl border border-white/5 my-4 flex-shrink-0">
-                    {[
-                      { id: 'file', label: 'Audio File Upload', icon: Upload },
-                      { id: 'spotify', label: 'Spotify Track URL', icon: LinkIcon },
-                      { id: 'youtube', label: 'YouTube Video Link', icon: Disc },
-                      { id: 'record', label: 'Microphone Studio', icon: Mic }
-                    ].map(tab => {
+                  {/* High-Level Distinct Creation Mode Cards */}
+                  <div className="grid sm:grid-cols-2 gap-3 my-4 flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCreationCategory('sang_by_me');
+                        if (ingestMethod === 'spotify' || ingestMethod === 'youtube') {
+                          setIngestMethod('record');
+                        }
+                      }}
+                      className={`p-4 rounded-2xl border text-left transition-all cursor-pointer relative ${
+                        creationCategory === 'sang_by_me'
+                          ? 'bg-gradient-to-br from-[#e5a958]/15 via-[#e5a958]/5 to-transparent border-[#e5a958] shadow-[0_0_20px_rgba(229,169,88,0.2)] ring-1 ring-[#e5a958]'
+                          : 'bg-white/[0.02] border-white/10 hover:border-white/20 hover:bg-white/[0.04]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#e5a958] flex items-center gap-1.5">
+                          <Mic className="w-4 h-4" /> Mode A: Vocal Take
+                        </span>
+                        {creationCategory === 'sang_by_me' && (
+                          <span className="w-2.5 h-2.5 rounded-full bg-[#e5a958] shadow-[0_0_8px_#e5a958]" />
+                        )}
+                      </div>
+                      <div className="mt-2 text-base font-bold text-white">
+                        🎤 I Sang This Song (My Vocal Take)
+                      </div>
+                      <p className="mt-1 text-xs text-white/60 leading-relaxed">
+                        You sang the take. Lyra cleans room echo, snaps pitch to scale, aligns timing, and lets you keep your voice or pick a model.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCreationCategory('cover');
+                        if (ingestMethod === 'record') {
+                          setIngestMethod('file');
+                        }
+                      }}
+                      className={`p-4 rounded-2xl border text-left transition-all cursor-pointer relative ${
+                        creationCategory === 'cover'
+                          ? 'bg-gradient-to-br from-[#3fe0c5]/15 via-[#3fe0c5]/5 to-transparent border-[#3fe0c5] shadow-[0_0_20px_rgba(63,224,197,0.2)] ring-1 ring-[#3fe0c5]'
+                          : 'bg-white/[0.02] border-white/10 hover:border-white/20 hover:bg-white/[0.04]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#3fe0c5] flex items-center gap-1.5">
+                          <Sparkles className="w-4 h-4" /> Mode B: Full Song Cover
+                        </span>
+                        {creationCategory === 'cover' && (
+                          <span className="w-2.5 h-2.5 rounded-full bg-[#3fe0c5] shadow-[0_0_8px_#3fe0c5]" />
+                        )}
+                      </div>
+                      <div className="mt-2 text-base font-bold text-white">
+                        ✨ Neural AI Cover (Resing Full Song)
+                      </div>
+                      <p className="mt-1 text-xs text-white/60 leading-relaxed">
+                        Use a full song from YouTube, Spotify, or file. Lyra extracts vocal stems and resings it using an AI legend or personal model.
+                      </p>
+                    </button>
+                  </div>
+
+                  {/* Mode-Specific Ingestion Method Tabs */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-white/[0.035] p-1.5 rounded-2xl border border-white/5 mb-3 flex-shrink-0">
+                    {(creationCategory === 'sang_by_me'
+                      ? [
+                          { id: 'record', label: 'Microphone Studio (Record)', icon: Mic },
+                          { id: 'file', label: 'Upload Vocal Audio File', icon: Upload }
+                        ]
+                      : [
+                          { id: 'file', label: 'Upload Song File', icon: Upload },
+                          { id: 'spotify', label: 'Spotify Track URL', icon: LinkIcon },
+                          { id: 'youtube', label: 'YouTube Video Link', icon: Disc }
+                        ]
+                    ).map(tab => {
                       const Icon = tab.icon;
                       const isActive = (ingestMethod === tab.id);
                       return (
@@ -1686,8 +1794,8 @@ export default function StudioView({
                             setPreviewPlaying(false);
                             setIngestMethod(tab.id);
                           }}
-                          className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${isActive
-                              ? 'bg-[#e5a958]/[0.08] text-[#e5a958] shadow-md border border-white/10'
+                          className={`py-2.5 px-3 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${isActive
+                              ? 'bg-[#e5a958]/[0.12] text-[#e5a958] shadow-md border border-[#e5a958]/30'
                               : 'text-white/60 hover:text-white hover:bg-white/5'
                             }`}
                         >
@@ -1696,6 +1804,82 @@ export default function StudioView({
                         </button>
                       );
                     })}
+                  </div>
+
+                  {/* Distinct Model Selector: Existing AI Legends vs Created by You */}
+                  <div className="p-3 rounded-2xl bg-white/[0.02] border border-white/5 mb-3 flex-shrink-0 space-y-2">
+                    <div className="flex items-center justify-between text-[11px] font-mono text-white/50">
+                      <span>CHOOSE SINGER FOR THIS TRACK</span>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('voicelab')}
+                        className="text-[#e5a958] hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        + Train New Voice in Voice Lab →
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {creationCategory === 'sang_by_me' && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedModel('raw')}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer flex items-center gap-1.5 ${
+                            selectedModel === 'raw'
+                              ? 'bg-[#e5a958] text-black border-[#e5a958] shadow-sm'
+                              : 'bg-white/5 border-white/10 text-white/70 hover:text-white'
+                          }`}
+                        >
+                          <Mic className="w-3.5 h-3.5" />
+                          <span>Keep My Own Voice (In Tune)</span>
+                        </button>
+                      )}
+
+                      {/* Group 1: AI Legends */}
+                      <span className="text-[10px] font-mono uppercase text-white/40 px-1">AI Legends:</span>
+                      {[
+                        { id: 'arijit_singh', name: 'Arijit Singh' },
+                        { id: 'sonu_nigam', name: 'Sonu Nigam' },
+                        { id: 'kk', name: 'KK' },
+                      ].map(model => (
+                        <button
+                          key={model.id}
+                          type="button"
+                          onClick={() => setSelectedModel(model.id)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition cursor-pointer flex items-center gap-1.5 ${
+                            selectedModel === model.id
+                              ? 'bg-[#e5a958]/20 border-[#e5a958] text-[#e5a958] font-bold shadow-sm'
+                              : 'bg-white/5 border-white/10 text-white/70 hover:text-white'
+                          }`}
+                        >
+                          <span>{model.name}</span>
+                          {selectedModel === model.id && <Check className="w-3 h-3 text-[#e5a958]" />}
+                        </button>
+                      ))}
+
+                      {/* Group 2: Created by You */}
+                      {personalVoices.filter(v => v.is_ready).length > 0 && (
+                        <>
+                          <span className="text-[10px] font-mono uppercase text-[#3fe0c5] px-1">Created By You:</span>
+                          {personalVoices.filter(v => v.is_ready).map(model => (
+                            <button
+                              key={model.id}
+                              type="button"
+                              onClick={() => setSelectedModel(model.id)}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition cursor-pointer flex items-center gap-1.5 ${
+                                selectedModel === model.id
+                                  ? 'bg-[#3fe0c5]/20 border-[#3fe0c5] text-[#3fe0c5] font-bold shadow-sm'
+                                  : 'bg-white/5 border-white/10 text-white/70 hover:text-white'
+                              }`}
+                            >
+                              <span>{model.name}</span>
+                              <span className="text-[9px] font-mono px-1 rounded bg-white/10">Custom</span>
+                              {selectedModel === model.id && <Check className="w-3 h-3 text-[#3fe0c5]" />}
+                            </button>
+                          ))}
+                        </>
+                      )}
+                    </div>
                   </div>
 
                   {/* DOCK CONTENT STAGE: Shared audio preview element for all ingest methods */}
