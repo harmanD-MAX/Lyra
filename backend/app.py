@@ -28,7 +28,7 @@ import voices
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
-OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
+OUTPUTS_DIR = os.environ.get("LYRA_OUTPUTS_DIR", os.path.join(BASE_DIR, "outputs"))
 MODELS_DIR = os.path.join(BASE_DIR, "models", "arijit_singh")
 
 os.makedirs(UPLOADS_DIR, exist_ok=True)
