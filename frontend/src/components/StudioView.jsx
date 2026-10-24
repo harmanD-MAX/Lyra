@@ -897,39 +897,6 @@ export default function StudioView({
             </button>
           </nav>
 
-          {/* Vocalist Personas Switcher */}
-          <div className="pt-4 border-t border-white/5 space-y-2">
-            <div className="text-[10px] uppercase font-bold tracking-wider text-white/40 px-2 flex items-center justify-between">
-              <span>Vocalist Persona</span>
-              <span className="text-[#3fe0c5] font-mono">{selectedEngine.toUpperCase()} · Metal</span>
-            </div>
-
-            <div className="space-y-1.5">
-              {[
-                { id: 'arijit_singh', name: 'Arijit Singh', vibe: 'Soulful Ballad & Warmth' },
-                { id: 'sonu_nigam', name: 'Sonu Nigam', vibe: 'Classical Range & Laser Pitch' },
-                { id: 'kk', name: 'KK', vibe: 'Raw Rock Tenor & Power' },
-              ].map(model => (
-                <button
-                  key={model.id}
-                  type="button"
-                  onClick={() => setSelectedModel(model.id)}
-                  className={`w-full text-left p-2.5 rounded-xl border text-xs transition-all cursor-pointer ${selectedModel === model.id
-                      ? 'bg-[#e5a958]/[0.08] border-[#e5a958]/50 text-white shadow-sm ring-1 ring-[#e5a958]/30'
-                      : 'bg-white/[0.03] border-white/5 text-white/60 hover:text-white hover:border-white/10'
-                    }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-white">{model.name}</span>
-                    {selectedModel === model.id && (
-                      <span className="w-2 h-2 rounded-full bg-[#e5a958]" />
-                    )}
-                  </div>
-                  <div className="text-[10px] text-white/50 truncate mt-0.5">{model.vibe}</div>
-                </button>
-              ))}
-            </div>
-          </div>
 
         </div>
 
@@ -972,16 +939,16 @@ export default function StudioView({
 
       </aside>
 
-      {/* ========================================================================      {/* =========================================================================
-          MAIN WORKSPACE (Fixed, Non-Scrollable Viewport Console)
+      {/* =========================================================================
+          MAIN WORKSPACE (Scrollable, Responsive Studio Canvas)
          ========================================================================= */}
-      <main className="flex-1 flex flex-col bg-transparent h-screen overflow-hidden relative">
+      <main className="flex-1 flex flex-col bg-transparent h-screen overflow-y-auto relative">
         {/* Same backdrop as the landing page: perspective grid + warm/teal glow */}
         <div className="hero-grid absolute inset-0 pointer-events-none" />
         <div className="aurora pointer-events-none absolute -top-48 right-[-15%] w-[900px] h-[560px] opacity-70" />
 
-        {/* Fixed Viewport Main Canvas (No Outer Page Scrolling) */}
-        <div className="flex-1 h-full overflow-hidden px-4 sm:px-8 py-4 sm:py-5 flex flex-col justify-center">
+        {/* Studio Viewport Canvas with Clean Responsive Padding */}
+        <div className="flex-1 w-full px-4 sm:px-8 py-5 flex flex-col items-center">
 
           {/* =====================================================================
               TAB: MY SONGS (Fixed Viewport Table with Internal Scrollable Rows)
@@ -1164,9 +1131,9 @@ export default function StudioView({
                 </div>
               )}
 
-              {/* Viewport-Fitted Studio Master Console */}
+              {/* Studio Master Console */}
               {currentResults && (
-                <div className="studio-glass border border-white/10 rounded-3xl p-5 sm:p-6 shadow-2xl flex flex-col justify-between max-h-[calc(100vh-3rem)] overflow-hidden animate-fadeIn relative my-auto">
+                <div className="studio-glass border border-white/10 rounded-3xl p-5 sm:p-6 shadow-2xl flex flex-col justify-between w-full max-w-5xl mx-auto animate-fadeIn relative mb-8">
 
                   {/* Subtle Top Acoustic Rim Glow */}
                   <div className="absolute top-0 left-1/4 right-1/4 h-[1px] bg-gradient-to-r from-transparent via-[#e5a958]/50 to-transparent" />
@@ -1643,21 +1610,21 @@ export default function StudioView({
                   SONG INGESTION DOCK (Completely Fixed Height - Zero Jumping/Shrinking)
                  ================================================================= */}
               {(!currentResults && !activeJobId) && (
-                <div className="studio-glass border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col justify-between max-w-6xl w-full mx-auto relative overflow-hidden my-auto">
+                <div className="studio-glass border border-white/10 rounded-3xl p-5 sm:p-6 shadow-2xl flex flex-col max-w-5xl w-full mx-auto relative animate-fadeIn mb-8">
 
                   {/* Subtle Top Ambient Rim Glow */}
                   <div className="absolute top-0 left-1/4 right-1/4 h-[1px] bg-gradient-to-r from-transparent via-[#e5a958]/40 to-transparent" />
 
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-white/10 flex-shrink-0">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10 flex-shrink-0">
                     <div className="space-y-0.5">
-                      <h3 className="text-2xl sm:text-3xl font-bold text-white pb-1 leading-tight overflow-visible" style={{ fontFamily: "var(--font-display)" }}>
+                      <h3 className="text-xl sm:text-2xl font-bold text-white pb-0.5 leading-tight overflow-visible" style={{ fontFamily: "var(--font-display)" }}>
                         {creationCategory === 'sang_by_me' ? (
                           <>Your <span className="font-accent text-[#e5a958] pr-1">Vocal Take</span> & Pitch Engine</>
                         ) : (
                           <>Neural <span className="font-accent text-[#3fe0c5] pr-1">AI Song Cover</span> Studio</>
                         )}
                       </h3>
-                      <p className="text-xs sm:text-sm text-white/60">
+                      <p className="text-xs text-white/60">
                         {creationCategory === 'sang_by_me'
                           ? 'You sang the vocals. Lyra fixes pitch, cleans room echo, and masters your voice or applies a model.'
                           : 'Bring in any full song. Lyra separates stems with RoFormer v2 and resings lead vocals.'}
@@ -1665,7 +1632,7 @@ export default function StudioView({
                     </div>
 
                     <div className="flex items-center gap-2 self-start sm:self-auto flex-shrink-0">
-                      <span className="text-xs font-mono text-[#e5a958] px-3.5 py-1.5 rounded-full bg-[#e5a958]/10 border border-[#e5a958]/25 flex items-center gap-2">
+                      <span className="text-xs font-mono text-[#e5a958] px-3 py-1 rounded-full bg-[#e5a958]/10 border border-[#e5a958]/25 flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-[#e5a958] animate-pulse" />
                         <span>Target: {singerName}</span>
                       </span>
@@ -1673,7 +1640,7 @@ export default function StudioView({
                   </div>
 
                   {/* High-Level Distinct Creation Mode Cards */}
-                  <div className="grid sm:grid-cols-2 gap-3 my-4 flex-shrink-0">
+                  <div className="grid sm:grid-cols-2 gap-2.5 my-3 flex-shrink-0">
                     <button
                       type="button"
                       onClick={() => {
@@ -1682,25 +1649,25 @@ export default function StudioView({
                           setIngestMethod('record');
                         }
                       }}
-                      className={`p-4 rounded-2xl border text-left transition-all cursor-pointer relative ${
+                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative ${
                         creationCategory === 'sang_by_me'
-                          ? 'bg-gradient-to-br from-[#e5a958]/15 via-[#e5a958]/5 to-transparent border-[#e5a958] shadow-[0_0_20px_rgba(229,169,88,0.2)] ring-1 ring-[#e5a958]'
+                          ? 'bg-gradient-to-br from-[#e5a958]/15 via-[#e5a958]/5 to-transparent border-[#e5a958] shadow-[0_0_15px_rgba(229,169,88,0.15)] ring-1 ring-[#e5a958]'
                           : 'bg-white/[0.02] border-white/10 hover:border-white/20 hover:bg-white/[0.04]'
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#e5a958] flex items-center gap-1.5">
-                          <Mic className="w-4 h-4" /> Mode A: Vocal Take
+                        <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#e5a958] flex items-center gap-1.5">
+                          <Mic className="w-3.5 h-3.5" /> Mode A: Vocal Take
                         </span>
                         {creationCategory === 'sang_by_me' && (
-                          <span className="w-2.5 h-2.5 rounded-full bg-[#e5a958] shadow-[0_0_8px_#e5a958]" />
+                          <span className="w-2 h-2 rounded-full bg-[#e5a958] shadow-[0_0_8px_#e5a958]" />
                         )}
                       </div>
-                      <div className="mt-2 text-base font-bold text-white">
+                      <div className="mt-1 text-sm sm:text-base font-bold text-white">
                         🎤 I Sang This Song (My Vocal Take)
                       </div>
-                      <p className="mt-1 text-xs text-white/60 leading-relaxed">
-                        You sang the take. Lyra cleans room echo, snaps pitch to scale, aligns timing, and lets you keep your voice or pick a model.
+                      <p className="mt-0.5 text-[11px] text-white/55 line-clamp-1">
+                        Auto-tune, clean room echo, and master your vocal take.
                       </p>
                     </button>
 
@@ -1712,31 +1679,31 @@ export default function StudioView({
                           setIngestMethod('file');
                         }
                       }}
-                      className={`p-4 rounded-2xl border text-left transition-all cursor-pointer relative ${
+                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative ${
                         creationCategory === 'cover'
-                          ? 'bg-gradient-to-br from-[#3fe0c5]/15 via-[#3fe0c5]/5 to-transparent border-[#3fe0c5] shadow-[0_0_20px_rgba(63,224,197,0.2)] ring-1 ring-[#3fe0c5]'
+                          ? 'bg-gradient-to-br from-[#3fe0c5]/15 via-[#3fe0c5]/5 to-transparent border-[#3fe0c5] shadow-[0_0_15px_rgba(63,224,197,0.15)] ring-1 ring-[#3fe0c5]'
                           : 'bg-white/[0.02] border-white/10 hover:border-white/20 hover:bg-white/[0.04]'
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#3fe0c5] flex items-center gap-1.5">
-                          <Sparkles className="w-4 h-4" /> Mode B: Full Song Cover
+                        <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#3fe0c5] flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5" /> Mode B: Full Song Cover
                         </span>
                         {creationCategory === 'cover' && (
-                          <span className="w-2.5 h-2.5 rounded-full bg-[#3fe0c5] shadow-[0_0_8px_#3fe0c5]" />
+                          <span className="w-2 h-2 rounded-full bg-[#3fe0c5] shadow-[0_0_8px_#3fe0c5]" />
                         )}
                       </div>
-                      <div className="mt-2 text-base font-bold text-white">
+                      <div className="mt-1 text-sm sm:text-base font-bold text-white">
                         ✨ Neural AI Cover (Resing Full Song)
                       </div>
-                      <p className="mt-1 text-xs text-white/60 leading-relaxed">
-                        Use a full song from YouTube, Spotify, or file. Lyra extracts vocal stems and resings it using an AI legend or personal model.
+                      <p className="mt-0.5 text-[11px] text-white/55 line-clamp-1">
+                        Extract stems with RoFormer v2 and resing lead vocals.
                       </p>
                     </button>
                   </div>
 
                   {/* Mode-Specific Ingestion Method Tabs */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-white/[0.035] p-1.5 rounded-2xl border border-white/5 mb-3 flex-shrink-0">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-white/[0.035] p-1.5 rounded-xl border border-white/5 mb-3 flex-shrink-0">
                     {(creationCategory === 'sang_by_me'
                       ? [
                           { id: 'record', label: 'Microphone Studio (Record)', icon: Mic },
@@ -1759,12 +1726,12 @@ export default function StudioView({
                             setPreviewPlaying(false);
                             setIngestMethod(tab.id);
                           }}
-                          className={`py-2.5 px-3 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${isActive
+                          className={`py-2 px-3 rounded-lg text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${isActive
                               ? 'bg-[#e5a958]/[0.12] text-[#e5a958] shadow-md border border-[#e5a958]/30'
                               : 'text-white/60 hover:text-white hover:bg-white/5'
                             }`}
                         >
-                          <Icon className={`w-4 h-4 ${isActive ? 'text-[#e5a958]' : ''}`} />
+                          <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-[#e5a958]' : ''}`} />
                           <span>{tab.label}</span>
                         </button>
                       );
@@ -1772,10 +1739,10 @@ export default function StudioView({
                   </div>
 
                   {/* SINGER & CONVERSION ENGINE SUITE */}
-                  <div className="p-4 sm:p-5 rounded-2xl bg-white/[0.025] border border-white/10 mb-4 space-y-4">
+                  <div className="p-3.5 sm:p-4 rounded-xl bg-white/[0.025] border border-white/10 mb-3 space-y-3">
                     {/* 1. Singer Persona Choice */}
                     <div>
-                      <div className="flex items-center justify-between text-xs font-mono text-white/50 mb-2">
+                      <div className="flex items-center justify-between text-xs font-mono text-white/50 mb-1.5">
                         <span className="uppercase tracking-wider font-semibold">1. SELECT SINGER PERSONA</span>
                         <span className="text-[#3fe0c5]">Arijit • Sonu • KK (RVC & Seed-VC Ready)</span>
                       </div>
@@ -1785,7 +1752,7 @@ export default function StudioView({
                           <button
                             type="button"
                             onClick={() => setSelectedModel('raw')}
-                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                            className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                               selectedModel === 'raw'
                                 ? 'bg-[#e5a958]/20 border-[#e5a958] text-white shadow-md ring-1 ring-[#e5a958]'
                                 : 'bg-white/[0.02] border-white/10 text-white/70 hover:text-white hover:bg-white/5'
@@ -1795,7 +1762,7 @@ export default function StudioView({
                               <span className="font-bold text-xs sm:text-sm">Keep My Voice</span>
                               {selectedModel === 'raw' && <Check className="w-3.5 h-3.5 text-[#e5a958]" />}
                             </div>
-                            <span className="text-[10px] text-white/50 mt-1">In Tune • No Timbre Change</span>
+                            <span className="text-[10px] text-white/50 mt-0.5">In Tune • No Timbre Change</span>
                           </button>
                         )}
 
@@ -1808,7 +1775,7 @@ export default function StudioView({
                             key={s.id}
                             type="button"
                             onClick={() => setSelectedModel(s.id)}
-                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                            className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                               selectedModel === s.id
                                 ? 'bg-[#e5a958]/20 border-[#e5a958] text-white shadow-md ring-1 ring-[#e5a958]'
                                 : 'bg-white/[0.02] border-white/10 text-white/70 hover:text-white hover:bg-white/5'
@@ -1818,7 +1785,7 @@ export default function StudioView({
                               <span className="font-bold text-xs sm:text-sm">{s.name}</span>
                               {selectedModel === s.id && <Check className="w-3.5 h-3.5 text-[#e5a958]" />}
                             </div>
-                            <span className="text-[10px] text-white/50 mt-1">{s.vibe}</span>
+                            <span className="text-[10px] text-white/50 mt-0.5">{s.vibe}</span>
                           </button>
                         ))}
                       </div>
@@ -1826,18 +1793,18 @@ export default function StudioView({
 
                     {/* 2. Choose Model Engine: RVC v2 vs Seed-VC */}
                     {selectedModel !== 'raw' && (
-                      <div className="pt-3 border-t border-white/5">
-                        <div className="flex items-center justify-between text-xs font-mono text-white/50 mb-2">
+                      <div className="pt-2.5 border-t border-white/5">
+                        <div className="flex items-center justify-between text-xs font-mono text-white/50 mb-1.5">
                           <span className="uppercase tracking-wider font-semibold">2. CHOOSE CONVERSION ENGINE</span>
                           <span className="text-[#e5a958]">Select model for {singerName}</span>
                         </div>
 
-                        <div className="grid sm:grid-cols-2 gap-2.5">
+                        <div className="grid sm:grid-cols-2 gap-2">
                           {/* Option 1: RVC v2 */}
                           <button
                             type="button"
                             onClick={() => setSelectedEngine('rvc')}
-                            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
                               selectedEngine === 'rvc'
                                 ? 'bg-gradient-to-r from-[#e5a958]/20 to-transparent border-[#e5a958] text-white shadow-md ring-1 ring-[#e5a958]'
                                 : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:bg-white/5'
@@ -1845,13 +1812,13 @@ export default function StudioView({
                           >
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
-                                <span className="font-bold text-sm text-white">⚡ RVC v2</span>
+                                <span className="font-bold text-xs sm:text-sm text-white">⚡ RVC v2</span>
                                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#e5a958]/15 text-[#e5a958] border border-[#e5a958]/30">48 kHz Metal</span>
                               </div>
-                              {selectedEngine === 'rvc' && <Check className="w-4 h-4 text-[#e5a958]" />}
+                              {selectedEngine === 'rvc' && <Check className="w-3.5 h-3.5 text-[#e5a958]" />}
                             </div>
-                            <p className="text-[11px] text-white/60 mt-1.5 leading-relaxed">
-                              Rock-solid pitch lock, iconic vibrato & high belt power. Best for classical runs, belting pop/rock, and energetic tracks.
+                            <p className="text-[11px] text-white/60 mt-1 leading-snug line-clamp-1">
+                              Rock-solid pitch lock, iconic vibrato & high belt power.
                             </p>
                           </button>
 
@@ -1859,7 +1826,7 @@ export default function StudioView({
                           <button
                             type="button"
                             onClick={() => setSelectedEngine('seedvc')}
-                            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
                               selectedEngine === 'seedvc'
                                 ? 'bg-gradient-to-r from-[#3fe0c5]/20 to-transparent border-[#3fe0c5] text-white shadow-md ring-1 ring-[#3fe0c5]'
                                 : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:bg-white/5'
@@ -1867,13 +1834,13 @@ export default function StudioView({
                           >
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
-                                <span className="font-bold text-sm text-white">🌱 Seed-VC Singing</span>
+                                <span className="font-bold text-xs sm:text-sm text-white">🌱 Seed-VC Singing</span>
                                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#3fe0c5]/15 text-[#3fe0c5] border border-[#3fe0c5]/30">44.1 kHz Hi-Fi DiT</span>
                               </div>
-                              {selectedEngine === 'seedvc' && <Check className="w-4 h-4 text-[#3fe0c5]" />}
+                              {selectedEngine === 'seedvc' && <Check className="w-3.5 h-3.5 text-[#3fe0c5]" />}
                             </div>
-                            <p className="text-[11px] text-white/60 mt-1.5 leading-relaxed">
-                              Diffusion Transformer with Whisper phonemes. Crystal lyric intelligibility, breathless micro-dynamics, and delicate phrasing.
+                            <p className="text-[11px] text-white/60 mt-1 leading-snug line-clamp-1">
+                              Diffusion Transformer with Whisper phonemes. Crystal lyric intelligibility & breath dynamics.
                             </p>
                           </button>
                         </div>
@@ -1881,8 +1848,8 @@ export default function StudioView({
                     )}
 
                     {/* 3. Fix Pitch & Auto-Tune Checkbox */}
-                    <div className="pt-3 border-t border-white/5">
-                      <label className="flex items-start gap-3 p-3.5 rounded-xl bg-black/30 border border-white/10 hover:border-[#e5a958]/40 transition cursor-pointer select-none">
+                    <div className="pt-2.5 border-t border-white/5">
+                      <label className="flex items-start gap-3 p-2.5 rounded-xl bg-black/30 border border-white/10 hover:border-[#e5a958]/40 transition cursor-pointer select-none">
                         <input
                           type="checkbox"
                           checked={fixPitch}
@@ -1898,8 +1865,8 @@ export default function StudioView({
                               <span className="text-[10px] font-mono text-white/40 bg-white/5 px-2 py-0.5 rounded-full">Raw Pitch Kept</span>
                             )}
                           </div>
-                          <p className="text-[11px] text-white/50 mt-0.5 leading-relaxed">
-                            Automatically detects song key, steadies tremor/wobble, and moves notes onto the scale. Uncheck to preserve natural microtonal takes.
+                          <p className="text-[11px] text-white/50 mt-0.5 leading-snug">
+                            Automatically detects song key, steadies tremor/wobble, and moves notes onto the scale. Uncheck to preserve raw microtonal takes.
                           </p>
                         </div>
                       </label>
@@ -1907,7 +1874,7 @@ export default function StudioView({
                   </div>
 
                   {/* DOCK CONTENT STAGE: Shared audio preview element for all ingest methods */}
-                  <div className="min-h-[220px] h-auto w-full flex flex-col justify-center my-1 flex-shrink-0">
+                  <div className="min-h-[140px] sm:min-h-[160px] h-auto w-full flex flex-col justify-center my-1 flex-shrink-0">
 
                     {/* Shared preview audio element for listening to recording or uploaded audio */}
                     <audio
