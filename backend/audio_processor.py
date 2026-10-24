@@ -697,6 +697,15 @@ def convert_voice(
     idx_path = os.path.join(model_info["dir"], model_info["index"])
     success = False
 
+    # Ensure RVC base assets (HuBERT, RMVPE) and singer model weights are downloaded on any environment
+    try:
+        import model_downloader
+        model_downloader.ensure_rvc_base_assets(progress_cb=progress_cb)
+        if not is_personal and not os.path.exists(pth_path):
+            model_downloader.ensure_singer_model(model_name, progress_cb=progress_cb)
+    except Exception as dl_err:
+        logger.warning(f"Auto-download check failed: {dl_err}")
+
     try:
         vc = get_cached_vc(pth_path)
         if progress_cb:
