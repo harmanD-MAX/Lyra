@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X, Download, FileMusic, Archive, Loader2, RefreshCw } from 'lucide-react';
+import { X, Download, FileMusic, Archive, RefreshCw } from 'lucide-react';
 
 const STEM_LABELS = {
   lead_vocal_converted: 'Lead vocal (rendered)',
@@ -86,13 +86,13 @@ export default function ComposerTools({ open, onClose, job, onRerendered }) {
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-3 sm:p-6 bg-black/70 backdrop-blur-sm animate-fadeIn" onClick={onClose}>
-      <div className="w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-3xl border border-white/10 bg-[#111317] shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-white/10 bg-[#111317]/95 backdrop-blur">
+      <div className="panel rim-glow w-full max-w-3xl max-h-[92vh] overflow-y-auto !bg-[#0f1115] animate-scaleIn" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-white/10 bg-[#0f1115]/95 backdrop-blur rounded-t-3xl">
           <div>
             <h2 className="text-lg font-bold" style={{ fontFamily: "var(--font-display)" }}>Composer tools</h2>
             <p className="text-xs text-white/50">Stems, MIDI and section re-render for your DAW.</p>
           </div>
-          <button type="button" onClick={onClose} className="p-2 rounded-full hover:bg-white/10 cursor-pointer" aria-label="Close"><X className="w-5 h-5" /></button>
+          <button type="button" onClick={onClose} className="btn btn-ghost btn-icon" aria-label="Close"><X /></button>
         </div>
 
         <div className="p-6 space-y-8">
@@ -117,7 +117,7 @@ export default function ComposerTools({ open, onClose, job, onRerendered }) {
             <section className="space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-white/85">Final melody</h3>
-                <a href={results.midi} className="inline-flex items-center gap-1.5 text-xs text-[#e5a958] hover:underline"><FileMusic className="w-3.5 h-3.5" /> Download MIDI</a>
+                <a href={results.midi} className="btn btn-outline-gold btn-sm"><FileMusic /> Download MIDI</a>
               </div>
               <PianoRoll notes={melody.notes} />
             </section>
@@ -127,12 +127,12 @@ export default function ComposerTools({ open, onClose, job, onRerendered }) {
           <section className="space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-white/85">24-bit stems</h3>
-              {results.stems_zip && <a href={results.stems_zip} className="inline-flex items-center gap-1.5 text-xs text-[#e5a958] hover:underline"><Archive className="w-3.5 h-3.5" /> Download all (.zip)</a>}
+              {results.stems_zip && <a href={results.stems_zip} className="btn btn-outline-gold btn-sm"><Archive /> Download all (.zip)</a>}
             </div>
             {Object.keys(stems).length === 0 && <p className="text-sm text-white/45">This job was made before stems were exported.</p>}
             <div className="grid sm:grid-cols-2 gap-2">
               {Object.entries(stems).map(([k, url]) => (
-                <a key={k} href={`${url}?download=true`} className="flex items-center justify-between rounded-xl border border-white/10 px-4 py-3 text-sm hover:border-white/30 transition">
+                <a key={k} href={`${url}?download=true`} className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3 text-sm hover:border-white/25 hover:bg-white/[0.05] transition">
                   <span>{STEM_LABELS[k] || k}</span>
                   <Download className="w-4 h-4 text-white/50" />
                 </a>
@@ -141,7 +141,7 @@ export default function ComposerTools({ open, onClose, job, onRerendered }) {
           </section>
 
           {/* Re-render */}
-          <section className="rounded-2xl border border-white/10 p-5 space-y-4">
+          <section className="panel-inset p-5 space-y-4">
             <h3 className="text-sm font-semibold text-white/85 flex items-center gap-2"><RefreshCw className="w-4 h-4 text-[#3fe0c5]" /> Re-render a section</h3>
             {!canRerender ? (
               <p className="text-sm text-white/45">Available for renders made with a voice model.</p>
@@ -155,12 +155,12 @@ export default function ComposerTools({ open, onClose, job, onRerendered }) {
                   ].map(([label, val, set, step]) => (
                     <label key={label} className="block">
                       <span className="text-white/60">{label}</span>
-                      <input type="number" step={step} value={val} onChange={(e) => set(parseFloat(e.target.value) || 0)} className="mt-1 w-full bg-[#1a1d23] border border-white/10 rounded-lg px-2 py-2 text-sm" />
+                      <input type="number" step={step} value={val} onChange={(e) => set(parseFloat(e.target.value) || 0)} className="mt-1 w-full bg-black/35 border border-white/10 rounded-xl px-3 h-10 text-sm font-mono outline-none focus:border-[#e5a958]/55" />
                     </label>
                   ))}
                 </div>
-                <button type="button" disabled={busy || end <= start} onClick={rerender} className="rounded-full bg-[#e5a958] text-black font-semibold px-5 py-2.5 text-sm cursor-pointer disabled:opacity-40 inline-flex items-center gap-2">
-                  {busy && <Loader2 className="w-4 h-4 animate-spin" />} Re-render section
+                <button type="button" disabled={busy || end <= start} onClick={rerender} className="btn btn-primary">
+                  {busy ? <span className="eq-loader"><span /><span /><span /></span> : <RefreshCw />} Re-render section
                 </button>
                 {msg && <p className="text-xs text-white/60">{msg}</p>}
               </>

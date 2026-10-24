@@ -24,8 +24,8 @@ export default function Header({ currentView = 'landing', onViewChange }) {
   };
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 backdrop-blur-md bg-black/20 border-b border-white/10 transition-all">
-      <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between relative">
+    <header className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl bg-[#07080a]/60 border-b border-white/[0.06] transition-all">
+      <div className="max-w-7xl mx-auto px-6 h-16 sm:h-[4.5rem] flex items-center justify-between relative">
         
         {/* Brand Logo - Exact 5-bar waveform logo */}
         <div 
@@ -34,7 +34,7 @@ export default function Header({ currentView = 'landing', onViewChange }) {
         >
           <LyraLogo />
           <span 
-            className="text-xl font-bold uppercase tracking-[0.2em] text-white group-hover:text-[#e5a958] transition-colors"
+            className="text-lg font-bold uppercase tracking-[0.22em] text-white group-hover:text-[#e5a958] transition-colors"
             style={{ fontFamily: "var(--font-display)" }}
           >
             Lyra
@@ -42,10 +42,11 @@ export default function Header({ currentView = 'landing', onViewChange }) {
         </div>
 
         {/* Center Nav Links */}
-        <nav className="hidden md:flex items-center gap-7 lg:gap-8 text-sm font-medium text-white/75 absolute left-1/2 -translate-x-1/2">
+        <nav className="hidden lg:flex items-center gap-7 text-sm font-medium text-white/75 absolute left-1/2 -translate-x-1/2">
           {[
-            ['features', 'How it works'],
-            ['myvoice', 'My Voice'],
+            ['guide', 'How to use'],
+            ['benchmarks', 'Benchmarks'],
+            ['myvoice', 'Vocal Take'],
             ['models', 'Voices'],
             ['composers', 'Composers'],
             ['faq', 'FAQ'],
@@ -65,7 +66,7 @@ export default function Header({ currentView = 'landing', onViewChange }) {
         <button
           type="button"
           onClick={() => onViewChange && onViewChange('studio')}
-          className="bg-[#e5a958] hover:bg-[#f0bb6e] text-black px-5 py-2.5 rounded-full transition-all cursor-pointer text-sm font-semibold shadow-[0_0_24px_rgba(229,169,88,0.35)] hover:shadow-[0_0_36px_rgba(229,169,88,0.55)] active:scale-95"
+          className="btn btn-primary"
         >
           Open Studio
         </button>
