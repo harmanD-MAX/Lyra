@@ -295,12 +295,13 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
     sep = separation.separate_pro(
         src["audio_path"], job_dir,
         has_music=p.has_music,
-        split_backing=p.split_backing and p.has_music,
-        dereverb=p.dereverb,
+        split_backing=p.split_backing and p.has_music and not resources.LITE,
+        dereverb=p.dereverb and not resources.LITE,
         progress_cb=progress,
     )
     converter_input = sep["lead_dry_path"]
     accompaniment = sep["accompaniment_path"] or sep["instrumental_path"] or None
+    audio_processor.clear_memory()
 
     # 2. Guide (my_voice): separate the reference song
     guide_lead = None
@@ -308,11 +309,13 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
         progress(40, "Preparing the guide song (original melody & backing track)...")
         gdir = os.path.join(job_dir, "guide")
         g_src = ingest(p.guide_source_type or "file", p.guide_file_path, p.guide_url, gdir, "guide_audio", progress)
-        g_sep = separation.separate_pro(g_src["audio_path"], gdir, has_music=True, split_backing=True,
-                                        dereverb=True, progress_cb=progress)
+        g_sep = separation.separate_pro(g_src["audio_path"], gdir, has_music=True,
+                                        split_backing=not resources.LITE,
+                                        dereverb=not resources.LITE, progress_cb=progress)
         guide_lead = g_sep["lead_dry_path"]
         accompaniment = g_sep["accompaniment_path"] or g_sep["instrumental_path"] or accompaniment
         meta["guide_title"] = g_src.get("title", "")
+        audio_processor.clear_memory()
 
     # 3. Musical analysis (key, tempo) from the backing track when we have one
     key, analysis = _resolve_key(p, accompaniment or sep["instrumental_path"] or None)
@@ -390,6 +393,7 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
     vocal_for_mix = lead_out
     if harmony_path:
         vocal_for_mix = _mix_harmony(lead_out, harmony_path, os.path.join(job_dir, "vocals_with_harmony.wav"))
+    audio_processor.clear_memory()
 
     # 8. MIDI of the final melody
     midi_file = ""

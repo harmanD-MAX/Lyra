@@ -59,12 +59,13 @@ def _to_channels_first(audio: np.ndarray) -> np.ndarray:
     return audio
 
 
-def _run_model(model_name: str, mix_cf: np.ndarray, progress_cb=None, label: str = "") -> dict:
+def _run_model(model_name: str, mix_cf: np.ndarray, progress_cb=None, label: str = "",
+               pct_start: int = 25, pct_end: int = 55) -> dict:
     """Run one pymss model on a (channels, samples) array at 44.1 kHz."""
     pymss = _import_pymss()
     os.makedirs(SEPARATION_MODELS_DIR, exist_ok=True)
     if progress_cb and label:
-        progress_cb(None, label)
+        progress_cb(pct_start, label)
     # Never fill the disk with a model download
     entry = pymss.get_model_entry(model_name)
     try:
@@ -77,6 +78,7 @@ def _run_model(model_name: str, mix_cf: np.ndarray, progress_cb=None, label: str
     params = {"normalize": False}
     if resources.LITE:
         params["batch_size"] = 1  # lower peak memory
+        params["mps_mlx_clear_cache"] = True
     sep = pymss.MSSeparator.from_model_name(
         model_name,
         model_dir=SEPARATION_MODELS_DIR,
@@ -85,6 +87,13 @@ def _run_model(model_name: str, mix_cf: np.ndarray, progress_cb=None, label: str
         device="auto",
         inference_params=params,
     )
+    if progress_cb:
+        def _chunk_cb(done, total, msg=""):
+            if total > 0:
+                chunk_pct = int(min(99, max(1, (done / total) * 100)))
+                pipe_pct = int(pct_start + (done / total) * (pct_end - pct_start))
+                progress_cb(pipe_pct, f"{label} ({chunk_pct}%)")
+        sep.progress_callback = _chunk_cb
     try:
         results = sep.separate(mix_cf, pbar=False)
     finally:
@@ -100,6 +109,12 @@ def _run_model(model_name: str, mix_cf: np.ndarray, progress_cb=None, label: str
 def _clear():
     import gc
     gc.collect()
+    try:
+        import mlx.core as mx
+        if hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
+            mx.metal.clear_cache()
+    except Exception:
+        pass
     try:
         import torch
         if torch.cuda.is_available():
@@ -169,9 +184,12 @@ def separate_pro(
     # Stage 1: vocals / instrumental
     vocals = None
     inst = None
+    multi_stage = bool(split_backing or dereverb)
+    s1_end = 46 if multi_stage else 56
     if has_music:
         try:
-            res = _run_model(VOCAL_MODEL, mix, progress_cb, "Isolating vocals with Mel-Band RoFormer...")
+            res = _run_model(VOCAL_MODEL, mix, progress_cb, "Isolating vocals with Mel-Band RoFormer...",
+                             pct_start=25, pct_end=s1_end)
             vocals = _pick(res, "vocals", "vocal")
             inst = _pick(res, "instrumental", "other", "no_vocals")
             if vocals is not None and inst is None:
@@ -187,7 +205,7 @@ def separate_pro(
             vocals = load_stereo_44k(stems["vocals_path"])
             inst = load_stereo_44k(stems["instrumental_path"])
             out["engine"] = "demucs:htdemucs"
-        report(48, "Vocal and instrumental stems extracted.")
+        report(s1_end, "Vocal and instrumental stems extracted.")
     else:
         vocals = mix
     _write(out["vocals_path"], vocals)
@@ -199,14 +217,15 @@ def separate_pro(
     backing = None
     if split_backing:
         try:
-            res = _run_model(KARAOKE_MODEL, vocals, progress_cb, "Splitting lead vocal from backing harmonies...")
+            res = _run_model(KARAOKE_MODEL, vocals, progress_cb, "Splitting lead vocal from backing harmonies...",
+                             pct_start=47, pct_end=51)
             lead_c = _pick(res, "vocals", "lead", "karaoke")
             back_c = _pick(res, "instrumental", "backing_vocal", "other")
             if lead_c is not None:
                 lead = lead_c
                 backing = back_c if back_c is not None else vocals[:, : lead.shape[1]] - lead
                 out["backing_path"] = _write(os.path.join(output_dir, "vocals_backing.wav"), backing)
-            report(53, "Lead and backing vocals separated.")
+            report(51, "Lead and backing vocals separated.")
         except Exception as e:
             logger.warning(f"Lead/backing split skipped: {e}")
     _write(out["lead_path"], lead)
@@ -215,11 +234,12 @@ def separate_pro(
     lead_dry = lead
     if dereverb:
         try:
-            res = _run_model(DEREVERB_MODEL, lead, progress_cb, "Removing reverb & echo from the lead vocal...")
+            res = _run_model(DEREVERB_MODEL, lead, progress_cb, "Removing reverb & echo from the lead vocal...",
+                             pct_start=52, pct_end=56)
             dry = _pick(res, "noreverb", "dry", "no reverb", "vocals")
             if dry is not None:
                 lead_dry = dry
-            report(57, "Lead vocal cleaned (reverb tails removed).")
+            report(56, "Lead vocal cleaned (reverb tails removed).")
         except Exception as e:
             logger.warning(f"De-reverb skipped: {e}")
     _write(out["lead_dry_path"], lead_dry)

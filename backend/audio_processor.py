@@ -103,7 +103,7 @@ def get_demucs_model():
             import demucs.pretrained
             logger.info("Loading Demucs htdemucs model...")
             DEMUCS_MODEL = demucs.pretrained.get_model("htdemucs")
-            device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
+            device = "cuda" if torch.cuda.is_available() else "cpu"
             DEMUCS_MODEL.to(device)
             DEMUCS_MODEL.eval()
             logger.info(f"Demucs loaded on {device}")
@@ -409,7 +409,7 @@ def separate_stems_demucs(audio_path: str, output_dir: str, progress_cb=None) ->
         progress_cb(30, "Analyzing track acoustics & loading Demucs stem separator...")
 
     model = get_demucs_model()
-    device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Read audio with soundfile (avoids torchcodec dependency)
     audio_data, sr = sf.read(audio_path)
@@ -643,7 +643,9 @@ def get_cached_vc(pth_path: str):
 
 
 def unload_vc_cache():
+    global DEMUCS_MODEL
     _VC_CACHE.clear()
+    DEMUCS_MODEL = None
     clear_memory()
 
 

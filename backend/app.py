@@ -78,9 +78,13 @@ async def startup_scan_jobs():
             if ext_title and not ext_title.startswith("Song Conversion (") and "Bigg Boss" not in ext_title and ext_res.get("singer"):
                 continue
 
+        saved_res = (saved_meta.get("results") or {}) if isinstance(saved_meta, dict) else {}
+        exist_res = (existing.get("results") or {}) if isinstance(existing, dict) else {}
+        exist_meta = (existing.get("metadata") or {}) if isinstance(existing, dict) else {}
+
         master_wav = os.path.join(job_dir, "master_remastered.wav")
         master_mp3 = os.path.join(job_dir, "master_remastered.mp3")
-        is_cloud_saved = bool((saved_meta.get("results", {}).get("saved_to_cloud") if saved_meta else None) or (existing.get("results", {}).get("saved_to_cloud") if existing else False))
+        is_cloud_saved = bool(saved_res.get("saved_to_cloud") or exist_res.get("saved_to_cloud"))
         has_master = os.path.exists(master_mp3) or os.path.exists(master_wav) or is_cloud_saved
 
         vocal_wav = None
@@ -96,12 +100,12 @@ async def startup_scan_jobs():
 
             # Determine model_name and singer
             model_name = (saved_meta.get("model_name") if saved_meta else None) or \
-                         (existing.get("metadata", {}).get("model_name") if existing else None) or \
-                         (existing.get("results", {}).get("model_name") if existing else None) or \
+                         exist_meta.get("model_name") or \
+                         exist_res.get("model_name") or \
                          "arijit_singh"
             model_info = audio_processor.AVAILABLE_MODELS.get(model_name, audio_processor.AVAILABLE_MODELS.get("arijit_singh", {"name": "Arijit Singh"}))
             singer_name = (saved_meta.get("singer") if saved_meta else None) or \
-                          (existing.get("results", {}).get("singer") if existing else None) or \
+                          exist_res.get("singer") or \
                           model_info.get("name", "Arijit Singh")
 
             # Determine real song title
@@ -109,29 +113,26 @@ async def startup_scan_jobs():
             if saved_meta and saved_meta.get("title") and "Bigg Boss" not in saved_meta.get("title", ""):
                 real_title = saved_meta["title"]
             elif existing:
-                ex_m = existing.get("metadata", {})
-                ex_r = existing.get("results", {})
-                cand = ex_r.get("title") or ex_m.get("title") or ex_m.get("filename")
+                cand = exist_res.get("title") or exist_meta.get("title") or exist_meta.get("filename")
                 if cand and not str(cand).startswith("Song Conversion (") and "Bigg Boss" not in str(cand):
                     real_title = cand
-                elif ex_m.get("youtube_url"):
+                elif exist_meta.get("youtube_url"):
                     real_title = f"YouTube Track ({singer_name} Version)"
-                elif ex_m.get("spotify_url"):
+                elif exist_meta.get("spotify_url"):
                     real_title = f"Spotify Track ({singer_name} Version)"
 
             if not real_title or real_title.startswith("Song Conversion (") or "Bigg Boss" in str(real_title):
                 real_title = f"Studio Track {name[:6]} ({singer_name} Version)"
 
             thumbnail = (saved_meta.get("thumbnail") if saved_meta else None) or \
-                        (existing.get("results", {}).get("thumbnail") if existing else None) or \
+                        exist_res.get("thumbnail") or \
                         ""
 
             uploader = (saved_meta.get("uploader") if saved_meta else None) or \
-                       (existing.get("results", {}).get("uploader") if existing else None) or \
+                       exist_res.get("uploader") or \
                        "AI Studio"
 
-            cloud_master_url = (saved_meta.get("results", {}).get("cloud_master_3d_url") if saved_meta else None) or \
-                               (existing.get("results", {}).get("cloud_master_3d_url") if existing else None)
+            cloud_master_url = saved_res.get("cloud_master_3d_url") or exist_res.get("cloud_master_3d_url")
 
             job_manager._jobs[name] = {
                 "id": name,
@@ -144,12 +145,12 @@ async def startup_scan_jobs():
                     "title": real_title,
                     "model_name": model_name,
                     "singer_name": singer_name,
-                    **(existing.get("metadata", {}) if existing else {})
+                    **exist_meta
                 },
                 "results": {
                     "title": real_title,
                     "thumbnail": thumbnail,
-                    "duration": (saved_meta.get("duration") if saved_meta else None) or (existing.get("results", {}).get("duration") if existing else 52.8) or 52.8,
+                    "duration": (saved_meta.get("duration") if saved_meta else None) or exist_res.get("duration") or 52.8,
                     "uploader": uploader,
                     "singer": singer_name,
                     "model_name": model_name,
@@ -255,6 +256,11 @@ def run_pipeline(job_id: str, params: "studio_pipeline.JobParams"):
     except BaseException as e:
         print(f"Error in job {job_id}: {traceback.format_exc()}")
         job_manager.update_job(job_id, status="error", error=str(e))
+    finally:
+        # Crucial for machines with small RAM (e.g. 8 GB): purge model weights and MPS buffers between songs
+        if resources.LITE or (0 < resources.ram_gb() <= 10.0):
+            audio_processor.unload_vc_cache()
+            audio_processor.clear_memory()
 
 
 def _save_upload(upload: UploadFile, prefix: str) -> str:
@@ -449,10 +455,10 @@ async def train_voice(
             paths.append(dest)
         except Exception:
             paths.append(raw)
-    if preset not in ("quick", "standard", "best"):
-        preset = "standard"
+    if preset not in ("auto", "quick", "standard", "best"):
+        preset = "auto"
     if steps is not None:
-        steps = int(max(200, min(steps, 20000)))
+        steps = int(max(100, min(steps, 20000)))
 
     def _work():
         import voice_training

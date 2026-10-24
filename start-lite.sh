@@ -13,6 +13,8 @@ fi
 
 export LYRA_PROFILE=lite
 export PYTORCH_ENABLE_MPS_FALLBACK=1
+export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0
 cd backend
 echo "Lyra (lite) → http://127.0.0.1:8000"
-exec python -m uvicorn app:app --host 127.0.0.1 --port 8000
+PYTHON="${PYTHON:-python3}"
+exec "$PYTHON" -m uvicorn app:app --host 127.0.0.1 --port 8000
