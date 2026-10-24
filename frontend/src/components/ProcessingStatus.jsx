@@ -80,6 +80,9 @@ export default function ProcessingStatus({ job, selectedModel, onReset }) {
                 type="button"
                 onClick={async () => {
                   try {
+                    if (job?.id) {
+                      await fetch(`/api/jobs/${job.id}/cancel`, { method: 'POST' });
+                    }
                     await fetch('/api/jobs/clear_queue', { method: 'POST' });
                   } catch (e) {}
                   onReset();
