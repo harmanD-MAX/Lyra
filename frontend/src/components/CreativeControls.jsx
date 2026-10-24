@@ -1,5 +1,5 @@
-import React, { useRef } from 'react';
-import { X, Mic2, AudioWaveform, Upload, Link as LinkIcon, Users, Music4, ChevronDown, Check } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { X, Mic2, AudioWaveform, Upload, Link as LinkIcon, Users, Music4, ChevronDown, Check, Cpu } from 'lucide-react';
 import { PRESETS } from '../creative';
 
 const KEYS = ['auto', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -33,7 +33,18 @@ function StepTitle({ n, children }) {
 
 export default function CreativeControls({ open, onClose, creative, setCreative, selectedModel, setSelectedModel, personalVoices, onOpenVoiceLab }) {
   const guideInput = useRef(null);
+  const [engineInfo, setEngineInfo] = useState(null);
+  useEffect(() => {
+    if (!open) return;
+    fetch('/api/engines').then((r) => (r.ok ? r.json() : null)).then(setEngineInfo).catch(() => {});
+  }, [open, personalVoices]);
   if (!open) return null;
+  const voiceEngine = engineInfo?.voices?.[selectedModel];
+  const engineLine = selectedModel === 'raw'
+    ? 'Your own voice, re-synthesized with the corrected melody (no model).'
+    : creative.advanced && creative.engine !== 'auto'
+      ? `${engineInfo?.labels?.[creative.engine] || creative.engine} (chosen in Advanced)`
+      : voiceEngine ? `${voiceEngine.label} — ${voiceEngine.reason}` : null;
   const set = (patch) => setCreative((c) => ({ ...c, ...patch }));
   const myVoice = creative.studioMode === 'my_voice';
   const readyVoices = (personalVoices || []).filter((v) => v.is_ready);
@@ -57,7 +68,7 @@ export default function CreativeControls({ open, onClose, creative, setCreative,
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-3 sm:p-6 bg-black/70 backdrop-blur-sm animate-fadeIn" onClick={onClose}>
       <div className="w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-3xl border border-white/10 bg-[#111317] shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-white/10 bg-[#111317]/95 backdrop-blur">
-          <h2 className="text-lg font-bold" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Set up your song</h2>
+          <h2 className="text-lg font-bold" style={{ fontFamily: "var(--font-display)" }}>Set up your song</h2>
           <button type="button" onClick={onClose} className="p-2 rounded-full hover:bg-white/10 cursor-pointer" aria-label="Close"><X className="w-5 h-5" /></button>
         </div>
 
@@ -105,7 +116,12 @@ export default function CreativeControls({ open, onClose, creative, setCreative,
                 </button>
               ))}
             </div>
-            <button type="button" onClick={onOpenVoiceLab} className="mt-3 text-xs text-[#e5a958] hover:underline cursor-pointer">Want it to sound exactly like you? Train your voice →</button>
+            {engineLine && (
+              <p className="mt-3 flex items-center gap-1.5 text-[11px] text-white/55">
+                <Cpu className="w-3.5 h-3.5 text-[#3fe0c5]" /> Sings with {engineLine}
+              </p>
+            )}
+            <button type="button" onClick={onOpenVoiceLab} className="mt-2 text-xs text-[#e5a958] hover:underline cursor-pointer">Want it to sound exactly like you? Train your voice →</button>
           </section>
 
           {/* Guide (My Voice only) */}
@@ -187,6 +203,14 @@ export default function CreativeControls({ open, onClose, creative, setCreative,
                     </select>
                   </div>
                 </div>
+ <label className="block text-xs sm:col-span-2">
+                  <span className="text-white/75">Voice engine</span>
+                  <select value={creative.engine} onChange={(e) => set({ engine: e.target.value })} className="mt-1.5 w-full bg-[#1a1d23] border border-white/10 rounded-lg px-2 py-2 text-sm">
+                    <option value="auto">Auto — benchmark winner, else Seed-VC when ready, else RVC</option>
+                    <option value="seedvc" disabled={voiceEngine && !voiceEngine.available?.seedvc}>Seed-VC singing (44.1 kHz) — clearer lyrics, closer likeness</option>
+                    <option value="rvc" disabled={voiceEngine && !voiceEngine.available?.rvc}>RVC v2 (40/48 kHz) — tightest pitch, cleanest audio</option>
+                  </select>
+                </label>
                 <Slider label="Pitch correction" value={creative.correction} onChange={(v) => set({ correction: v })} />
                 <Slider label="Steadiness" value={creative.steadiness} onChange={(v) => set({ steadiness: v })} />
                 <Slider label="Vibrato" value={creative.vibrato} onChange={(v) => set({ vibrato: v })} />

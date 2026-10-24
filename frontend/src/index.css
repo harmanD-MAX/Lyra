@@ -1,7 +1,10 @@
 @import "tailwindcss";
 
 :root {
-  --color-chatgpt-bg: #0b0c0e;
+  --font-display: 'Bricolage Grotesque', 'Inter', -apple-system, sans-serif;
+  --font-serif: 'Instrument Serif', Georgia, serif;
+  --font-body: 'Inter', -apple-system, sans-serif;
+  --color-chatgpt-bg: #07080a;
   --color-chatgpt-surface: #14161a;
   --color-chatgpt-surface-hover: #1c1f24;
   --color-chatgpt-border: #282c34;
@@ -16,10 +19,11 @@ html {
 }
 
 body {
-  background-color: #0b0c0e;
+  background-color: #07080a;
   color: #ececec;
   overflow-x: hidden;
-  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif;
+  font-family: var(--font-body);
+  font-feature-settings: 'ss01', 'cv11';
 }
 
 /* Space Grotesk Display & Branding Font */
@@ -29,9 +33,19 @@ body {
 [style*="'Space Grotesk'"],
 [style*="Space Grotesk"],
 [style*="'Syne'"],
-[style*="Syne"] {
-  font-family: 'Space Grotesk', -apple-system, sans-serif;
-  letter-spacing: -0.02em;
+[style*="Syne"],
+[style*="--font-display"] {
+  font-family: var(--font-display);
+  font-variation-settings: 'opsz' 96;
+  letter-spacing: -0.035em;
+}
+
+/* Accent words in headlines: elegant italic serif */
+.font-accent {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.01em;
 }
 
 .hero-headline {
@@ -320,4 +334,12 @@ html {
   background-size: 64px 64px;
   mask-image: radial-gradient(ellipse at 60% 45%, black 20%, transparent 70%);
   -webkit-mask-image: radial-gradient(ellipse at 60% 45%, black 20%, transparent 70%);
+}
+
+/* Studio panels: same glass as the landing page cards */
+.studio-glass {
+  background: linear-gradient(180deg, rgba(20, 22, 27, 0.82), rgba(12, 13, 16, 0.86));
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
