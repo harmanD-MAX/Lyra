@@ -291,14 +291,25 @@ export default function StudioView({
 
   // When job completes or changes, auto-load track
   const currentResults = currentJob?.results;
-  const isCloudOnly = Boolean(
+  const isCloudSaved = Boolean(
     currentResults?.saved_to_cloud ||
     currentResults?.cloud_master_3d_url ||
     currentJob?.saved_to_cloud ||
     currentJob?.results?.saved_to_cloud
   );
 
-  // If saved in Cloudflare R2, only Master 3D is saved/available in the cloud
+  const hasLocalStems = Boolean(
+    currentResults?.vocals_original ||
+    currentResults?.instrumental ||
+    currentResults?.vocals_arijit ||
+    currentResults?.vocals_converted ||
+    currentResults?.stems ||
+    (currentJob?.id && !currentResults?.cloud_only)
+  );
+
+  const isCloudOnly = Boolean(isCloudSaved && !hasLocalStems);
+
+  // Stems are available for playback and isolation unless it is strictly an archived remote cloud-only entry
   const availableStems = useMemo(() => {
     if (isCloudOnly) {
       return STEMS.filter((s) => s.id === 'master');
@@ -1553,8 +1564,8 @@ export default function StudioView({
                           </button>
                         ))}
                       </div>
-                      {isCloudOnly && (
-                        <span className="chip chip-gold !h-8 !text-[11px] gap-1.5 shrink-0" title="Only Master 3D is saved in Cloudflare R2 cloud storage">
+                      {isCloudSaved && (
+                        <span className="chip chip-gold !h-8 !text-[11px] gap-1.5 shrink-0" title="Master 3D is safely backed up to Cloudflare R2 cloud storage">
                           <Cloud className="w-3.5 h-3.5 text-[#e5a958]" /> Cloudflare R2 Master
                         </span>
                       )}

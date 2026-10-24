@@ -76,12 +76,15 @@ def detect_cuda_graph_support(device):
 def configure_cuda_graph(device):
     global _probe_result
     explicit = os.environ.get(ENV_NAME)
-    if explicit in {"0", "1"}:
-        if explicit == "0":
-            return False
-        if _device_type(device) != "cuda":
-            os.environ[ENV_NAME] = "0"
-            return False
+    # CUDA Graphs should only be enabled if explicitly requested (RVC_CUDA_GRAPH=1).
+    # For full audio tracks (3-6+ minute songs), eager execution uses ~1.2 GB VRAM,
+    # whereas CUDA Graph capture pre-allocates 11+ GB in private pools, triggering CUDA OOM on 15 GB GPUs.
+    if explicit != "1":
+        os.environ[ENV_NAME] = "0"
+        return False
+    if _device_type(device) != "cuda" or not torch.cuda.is_available():
+        os.environ[ENV_NAME] = "0"
+        return False
     with _probe_lock:
         if _probe_result is None:
             _probe_result = detect_cuda_graph_support(device)
@@ -175,7 +178,9 @@ class _GraphCache:
                 except Exception:
                     self.failures.add(signature)
                     self.fallback_count += 1
-                    logger.exception("CUDA Graph capture failed for %s; using eager", key)
+                    logger.exception("CUDA Graph capture failed for %s; clearing cache and using eager", key)
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                     return function(*inputs)
             else:
                 self.entries.move_to_end(signature)

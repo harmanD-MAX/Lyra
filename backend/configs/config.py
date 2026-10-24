@@ -7,6 +7,10 @@ from multiprocessing import cpu_count
 from pathlib import Path
 from tools.file_io import read_text
 
+# Prevent virtual memory fragmentation and default to eager mode for full-track audio
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+os.environ.setdefault("RVC_CUDA_GRAPH", "0")
+
 import torch
 import logging
 
