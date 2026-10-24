@@ -35,8 +35,6 @@ export default function StudioView({
   onBackToLanding,
   onDeleteJob,
   personalVoices = [],
-  creativeSummaryText = '',
-  onOpenCreative,
 }) {
   const [showComposerTools, setShowComposerTools] = useState(false);
   const [storage, setStorage] = useState(null);
@@ -940,15 +938,15 @@ export default function StudioView({
       </aside>
 
       {/* =========================================================================
-          MAIN WORKSPACE (Scrollable, Responsive Studio Canvas)
+          MAIN WORKSPACE (Fixed to Viewport Height - Zero Scrolling)
          ========================================================================= */}
-      <main className="flex-1 flex flex-col bg-transparent h-screen overflow-y-auto relative">
+      <main className="flex-1 flex flex-col bg-transparent h-screen overflow-hidden relative select-none">
         {/* Same backdrop as the landing page: perspective grid + warm/teal glow */}
         <div className="hero-grid absolute inset-0 pointer-events-none" />
         <div className="aurora pointer-events-none absolute -top-48 right-[-15%] w-[900px] h-[560px] opacity-70" />
 
-        {/* Studio Viewport Canvas with Clean Responsive Padding */}
-        <div className="flex-1 w-full px-4 sm:px-8 py-5 flex flex-col items-center">
+        {/* Viewport Canvas: 100% Fitted inside Viewport Height */}
+        <div className="flex-1 h-full max-h-screen overflow-hidden px-4 sm:px-6 py-2 sm:py-3 flex flex-col justify-center items-center">
 
           {/* =====================================================================
               TAB: MY SONGS (Fixed Viewport Table with Internal Scrollable Rows)
@@ -1119,10 +1117,11 @@ export default function StudioView({
 
 
           {/* =====================================================================
-              TAB: STUDIO WORKSPACE (Expansive Professional Studio Console)
+          {/* =====================================================================
+              TAB: STUDIO WORKSPACE (Fixed Viewport Console)
              ===================================================================== */}
           {activeTab === 'studio' && (
-            <div className="max-w-6xl w-full mx-auto space-y-6 animate-fadeIn">
+            <div className="max-w-5xl w-full mx-auto h-full max-h-full flex flex-col justify-center overflow-hidden animate-fadeIn">
 
               {/* If actively processing: show real-time pipeline status */}
               {isSubmitting && currentJob && (
@@ -1133,7 +1132,7 @@ export default function StudioView({
 
               {/* Studio Master Console */}
               {currentResults && (
-                <div className="studio-glass border border-white/10 rounded-3xl p-5 sm:p-6 shadow-2xl flex flex-col justify-between w-full max-w-5xl mx-auto animate-fadeIn relative mb-8">
+                <div className="studio-glass border border-white/10 rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col justify-between w-full max-w-5xl mx-auto animate-fadeIn relative max-h-full overflow-hidden">
 
                   {/* Subtle Top Acoustic Rim Glow */}
                   <div className="absolute top-0 left-1/4 right-1/4 h-[1px] bg-gradient-to-r from-transparent via-[#e5a958]/50 to-transparent" />
@@ -1610,139 +1609,120 @@ export default function StudioView({
                   SONG INGESTION DOCK (Completely Fixed Height - Zero Jumping/Shrinking)
                  ================================================================= */}
               {(!currentResults && !activeJobId) && (
-                <div className="studio-glass border border-white/10 rounded-3xl p-5 sm:p-6 shadow-2xl flex flex-col max-w-5xl w-full mx-auto relative animate-fadeIn mb-8">
+                <div className="studio-glass border border-white/10 rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col justify-between max-w-4xl w-full mx-auto relative overflow-hidden animate-fadeIn">
 
                   {/* Subtle Top Ambient Rim Glow */}
                   <div className="absolute top-0 left-1/4 right-1/4 h-[1px] bg-gradient-to-r from-transparent via-[#e5a958]/40 to-transparent" />
 
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10 flex-shrink-0">
-                    <div className="space-y-0.5">
-                      <h3 className="text-xl sm:text-2xl font-bold text-white pb-0.5 leading-tight overflow-visible" style={{ fontFamily: "var(--font-display)" }}>
+                  {/* Top Bar: Title & Active Model Badge */}
+                  <div className="flex items-center justify-between gap-3 pb-2 border-b border-white/10 flex-shrink-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base sm:text-lg font-bold text-white leading-none" style={{ fontFamily: "var(--font-display)" }}>
                         {creationCategory === 'sang_by_me' ? (
-                          <>Your <span className="font-accent text-[#e5a958] pr-1">Vocal Take</span> & Pitch Engine</>
+                          <>Your <span className="font-accent text-[#e5a958]">Vocal Take</span> & Pitch Engine</>
                         ) : (
-                          <>Neural <span className="font-accent text-[#3fe0c5] pr-1">AI Song Cover</span> Studio</>
+                          <>Neural <span className="font-accent text-[#3fe0c5]">AI Song Cover</span> Studio</>
                         )}
                       </h3>
-                      <p className="text-xs text-white/60">
+                      <span className="hidden md:inline-block text-[11px] text-white/40">
                         {creationCategory === 'sang_by_me'
-                          ? 'You sang the vocals. Lyra fixes pitch, cleans room echo, and masters your voice or applies a model.'
-                          : 'Bring in any full song. Lyra separates stems with RoFormer v2 and resings lead vocals.'}
-                      </p>
+                          ? '• Auto-tune, clean echo, & master voice.'
+                          : '• Separate stems & resing lead vocals.'}
+                      </span>
                     </div>
 
-                    <div className="flex items-center gap-2 self-start sm:self-auto flex-shrink-0">
-                      <span className="text-xs font-mono text-[#e5a958] px-3 py-1 rounded-full bg-[#e5a958]/10 border border-[#e5a958]/25 flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-[#e5a958] animate-pulse" />
-                        <span>Target: {singerName}</span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className="text-[11px] font-mono text-[#e5a958] px-2.5 py-0.5 rounded-full bg-[#e5a958]/10 border border-[#e5a958]/25 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#e5a958] animate-pulse" />
+                        <span>{singerName} · {selectedEngine === 'seedvc' ? 'Seed-VC 44k' : 'RVC v2 48k'}</span>
                       </span>
                     </div>
                   </div>
 
-                  {/* High-Level Distinct Creation Mode Cards */}
-                  <div className="grid sm:grid-cols-2 gap-2.5 my-3 flex-shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCreationCategory('sang_by_me');
-                        if (ingestMethod === 'spotify' || ingestMethod === 'youtube') {
-                          setIngestMethod('record');
-                        }
-                      }}
-                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative ${
-                        creationCategory === 'sang_by_me'
-                          ? 'bg-gradient-to-br from-[#e5a958]/15 via-[#e5a958]/5 to-transparent border-[#e5a958] shadow-[0_0_15px_rgba(229,169,88,0.15)] ring-1 ring-[#e5a958]'
-                          : 'bg-white/[0.02] border-white/10 hover:border-white/20 hover:bg-white/[0.04]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#e5a958] flex items-center gap-1.5">
-                          <Mic className="w-3.5 h-3.5" /> Mode A: Vocal Take
-                        </span>
-                        {creationCategory === 'sang_by_me' && (
-                          <span className="w-2 h-2 rounded-full bg-[#e5a958] shadow-[0_0_8px_#e5a958]" />
-                        )}
-                      </div>
-                      <div className="mt-1 text-sm sm:text-base font-bold text-white">
-                        🎤 I Sang This Song (My Vocal Take)
-                      </div>
-                      <p className="mt-0.5 text-[11px] text-white/55 line-clamp-1">
-                        Auto-tune, clean room echo, and master your vocal take.
-                      </p>
-                    </button>
+                  {/* Combined Toolbar: Mode Switcher (Left) + Source Tabs (Right) */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 my-2.5 flex-shrink-0">
+                    {/* Mode A vs Mode B */}
+                    <div className="inline-flex p-1 rounded-xl bg-black/40 border border-white/10">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCreationCategory('sang_by_me');
+                          if (ingestMethod === 'spotify' || ingestMethod === 'youtube') {
+                            setIngestMethod('record');
+                          }
+                        }}
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                          creationCategory === 'sang_by_me'
+                            ? 'bg-[#e5a958] text-black shadow-sm font-bold'
+                            : 'text-white/60 hover:text-white'
+                        }`}
+                      >
+                        <Mic className="w-3.5 h-3.5" />
+                        <span>Mode A: Vocal Take</span>
+                      </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCreationCategory('cover');
-                        if (ingestMethod === 'record') {
-                          setIngestMethod('file');
-                        }
-                      }}
-                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative ${
-                        creationCategory === 'cover'
-                          ? 'bg-gradient-to-br from-[#3fe0c5]/15 via-[#3fe0c5]/5 to-transparent border-[#3fe0c5] shadow-[0_0_15px_rgba(63,224,197,0.15)] ring-1 ring-[#3fe0c5]'
-                          : 'bg-white/[0.02] border-white/10 hover:border-white/20 hover:bg-white/[0.04]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#3fe0c5] flex items-center gap-1.5">
-                          <Sparkles className="w-3.5 h-3.5" /> Mode B: Full Song Cover
-                        </span>
-                        {creationCategory === 'cover' && (
-                          <span className="w-2 h-2 rounded-full bg-[#3fe0c5] shadow-[0_0_8px_#3fe0c5]" />
-                        )}
-                      </div>
-                      <div className="mt-1 text-sm sm:text-base font-bold text-white">
-                        ✨ Neural AI Cover (Resing Full Song)
-                      </div>
-                      <p className="mt-0.5 text-[11px] text-white/55 line-clamp-1">
-                        Extract stems with RoFormer v2 and resing lead vocals.
-                      </p>
-                    </button>
-                  </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCreationCategory('cover');
+                          if (ingestMethod === 'record') {
+                            setIngestMethod('file');
+                          }
+                        }}
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                          creationCategory === 'cover'
+                            ? 'bg-[#3fe0c5] text-black shadow-sm font-bold'
+                            : 'text-white/60 hover:text-white'
+                        }`}
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Mode B: AI Song Cover</span>
+                      </button>
+                    </div>
 
-                  {/* Mode-Specific Ingestion Method Tabs */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-white/[0.035] p-1.5 rounded-xl border border-white/5 mb-3 flex-shrink-0">
-                    {(creationCategory === 'sang_by_me'
-                      ? [
-                          { id: 'record', label: 'Microphone Studio (Record)', icon: Mic },
-                          { id: 'file', label: 'Upload Vocal Audio File', icon: Upload }
-                        ]
-                      : [
-                          { id: 'file', label: 'Upload Song File', icon: Upload },
-                          { id: 'spotify', label: 'Spotify Track URL', icon: LinkIcon },
-                          { id: 'youtube', label: 'YouTube Video Link', icon: Disc }
-                        ]
-                    ).map(tab => {
-                      const Icon = tab.icon;
-                      const isActive = (ingestMethod === tab.id);
-                      return (
-                        <button
-                          key={tab.id}
-                          type="button"
-                          onClick={() => {
-                            if (previewAudioRef.current) previewAudioRef.current.pause();
-                            setPreviewPlaying(false);
-                            setIngestMethod(tab.id);
-                          }}
-                          className={`py-2 px-3 rounded-lg text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${isActive
-                              ? 'bg-[#e5a958]/[0.12] text-[#e5a958] shadow-md border border-[#e5a958]/30'
-                              : 'text-white/60 hover:text-white hover:bg-white/5'
+                    {/* Ingestion Source Tabs */}
+                    <div className="inline-flex p-1 rounded-xl bg-white/[0.03] border border-white/5">
+                      {(creationCategory === 'sang_by_me'
+                        ? [
+                            { id: 'record', label: 'Microphone (Record)', icon: Mic },
+                            { id: 'file', label: 'Upload Vocal Audio', icon: Upload }
+                          ]
+                        : [
+                            { id: 'file', label: 'Upload Song', icon: Upload },
+                            { id: 'spotify', label: 'Spotify Track', icon: LinkIcon },
+                            { id: 'youtube', label: 'YouTube Video', icon: Disc }
+                          ]
+                      ).map(tab => {
+                        const Icon = tab.icon;
+                        const isActive = (ingestMethod === tab.id);
+                        return (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => {
+                              if (previewAudioRef.current) previewAudioRef.current.pause();
+                              setPreviewPlaying(false);
+                              setIngestMethod(tab.id);
+                            }}
+                            className={`py-1 px-2.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                              isActive
+                                ? 'bg-white/15 text-white font-semibold shadow-sm border border-white/20'
+                                : 'text-white/50 hover:text-white'
                             }`}
-                        >
-                          <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-[#e5a958]' : ''}`} />
-                          <span>{tab.label}</span>
-                        </button>
-                      );
-                    })}
+                          >
+                            <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-[#e5a958]' : ''}`} />
+                            <span>{tab.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  {/* SINGER & CONVERSION ENGINE SUITE */}
-                  <div className="p-3.5 sm:p-4 rounded-xl bg-white/[0.025] border border-white/10 mb-3 space-y-3">
-                    {/* 1. Singer Persona Choice */}
+                  {/* SINGER PERSONA & CONVERSION ENGINE CONSOLE */}
+                  <div className="p-3 rounded-xl bg-white/[0.025] border border-white/10 mb-2.5 space-y-2 flex-shrink-0">
+                    {/* Row 1: Singer Persona Choice */}
                     <div>
-                      <div className="flex items-center justify-between text-xs font-mono text-white/50 mb-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-mono text-white/50 mb-1">
                         <span className="uppercase tracking-wider font-semibold">1. SELECT SINGER PERSONA</span>
                         <span className="text-[#3fe0c5]">Arijit • Sonu • KK (RVC & Seed-VC Ready)</span>
                       </div>
@@ -1752,17 +1732,17 @@ export default function StudioView({
                           <button
                             type="button"
                             onClick={() => setSelectedModel('raw')}
-                            className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                            className={`p-2 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
                               selectedModel === 'raw'
-                                ? 'bg-[#e5a958]/20 border-[#e5a958] text-white shadow-md ring-1 ring-[#e5a958]'
+                                ? 'bg-[#e5a958]/20 border-[#e5a958] text-white shadow-sm ring-1 ring-[#e5a958]'
                                 : 'bg-white/[0.02] border-white/10 text-white/70 hover:text-white hover:bg-white/5'
                             }`}
                           >
-                            <div className="flex items-center justify-between">
-                              <span className="font-bold text-xs sm:text-sm">Keep My Voice</span>
-                              {selectedModel === 'raw' && <Check className="w-3.5 h-3.5 text-[#e5a958]" />}
+                            <div>
+                              <div className="font-bold text-xs">Keep My Voice</div>
+                              <div className="text-[10px] text-white/50">In Tune • No Model</div>
                             </div>
-                            <span className="text-[10px] text-white/50 mt-0.5">In Tune • No Timbre Change</span>
+                            {selectedModel === 'raw' && <Check className="w-3.5 h-3.5 text-[#e5a958]" />}
                           </button>
                         )}
 
@@ -1775,106 +1755,82 @@ export default function StudioView({
                             key={s.id}
                             type="button"
                             onClick={() => setSelectedModel(s.id)}
-                            className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                            className={`p-2 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
                               selectedModel === s.id
-                                ? 'bg-[#e5a958]/20 border-[#e5a958] text-white shadow-md ring-1 ring-[#e5a958]'
+                                ? 'bg-[#e5a958]/20 border-[#e5a958] text-white shadow-sm ring-1 ring-[#e5a958]'
                                 : 'bg-white/[0.02] border-white/10 text-white/70 hover:text-white hover:bg-white/5'
                             }`}
                           >
-                            <div className="flex items-center justify-between">
-                              <span className="font-bold text-xs sm:text-sm">{s.name}</span>
-                              {selectedModel === s.id && <Check className="w-3.5 h-3.5 text-[#e5a958]" />}
+                            <div>
+                              <div className="font-bold text-xs">{s.name}</div>
+                              <div className="text-[10px] text-white/50">{s.vibe}</div>
                             </div>
-                            <span className="text-[10px] text-white/50 mt-0.5">{s.vibe}</span>
+                            {selectedModel === s.id && <Check className="w-3.5 h-3.5 text-[#e5a958]" />}
                           </button>
                         ))}
                       </div>
                     </div>
 
-                    {/* 2. Choose Model Engine: RVC v2 vs Seed-VC */}
-                    {selectedModel !== 'raw' && (
-                      <div className="pt-2.5 border-t border-white/5">
-                        <div className="flex items-center justify-between text-xs font-mono text-white/50 mb-1.5">
-                          <span className="uppercase tracking-wider font-semibold">2. CHOOSE CONVERSION ENGINE</span>
-                          <span className="text-[#e5a958]">Select model for {singerName}</span>
-                        </div>
-
-                        <div className="grid sm:grid-cols-2 gap-2">
-                          {/* Option 1: RVC v2 */}
-                          <button
-                            type="button"
-                            onClick={() => setSelectedEngine('rvc')}
-                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
-                              selectedEngine === 'rvc'
-                                ? 'bg-gradient-to-r from-[#e5a958]/20 to-transparent border-[#e5a958] text-white shadow-md ring-1 ring-[#e5a958]'
-                                : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:bg-white/5'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="font-bold text-xs sm:text-sm text-white">⚡ RVC v2</span>
-                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#e5a958]/15 text-[#e5a958] border border-[#e5a958]/30">48 kHz Metal</span>
-                              </div>
-                              {selectedEngine === 'rvc' && <Check className="w-3.5 h-3.5 text-[#e5a958]" />}
-                            </div>
-                            <p className="text-[11px] text-white/60 mt-1 leading-snug line-clamp-1">
-                              Rock-solid pitch lock, iconic vibrato & high belt power.
-                            </p>
-                          </button>
-
-                          {/* Option 2: Seed-VC */}
-                          <button
-                            type="button"
-                            onClick={() => setSelectedEngine('seedvc')}
-                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
-                              selectedEngine === 'seedvc'
-                                ? 'bg-gradient-to-r from-[#3fe0c5]/20 to-transparent border-[#3fe0c5] text-white shadow-md ring-1 ring-[#3fe0c5]'
-                                : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:bg-white/5'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="font-bold text-xs sm:text-sm text-white">🌱 Seed-VC Singing</span>
-                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#3fe0c5]/15 text-[#3fe0c5] border border-[#3fe0c5]/30">44.1 kHz Hi-Fi DiT</span>
-                              </div>
-                              {selectedEngine === 'seedvc' && <Check className="w-3.5 h-3.5 text-[#3fe0c5]" />}
-                            </div>
-                            <p className="text-[11px] text-white/60 mt-1 leading-snug line-clamp-1">
-                              Diffusion Transformer with Whisper phonemes. Crystal lyric intelligibility & breath dynamics.
-                            </p>
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 3. Fix Pitch & Auto-Tune Checkbox */}
-                    <div className="pt-2.5 border-t border-white/5">
-                      <label className="flex items-start gap-3 p-2.5 rounded-xl bg-black/30 border border-white/10 hover:border-[#e5a958]/40 transition cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={fixPitch}
-                          onChange={(e) => setFixPitch(e.target.checked)}
-                          className="mt-0.5 w-4 h-4 rounded border-white/20 text-[#e5a958] focus:ring-[#e5a958] bg-black/60 cursor-pointer accent-[#e5a958]"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs sm:text-sm font-semibold text-white flex items-center gap-2">
-                            <span>Auto-Tune & Fix Pitch (Snap to Musical Key)</span>
-                            {fixPitch ? (
-                              <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">Pitch Lock Active</span>
-                            ) : (
-                              <span className="text-[10px] font-mono text-white/40 bg-white/5 px-2 py-0.5 rounded-full">Raw Pitch Kept</span>
-                            )}
+                    {/* Row 2: Choose Engine (Left) & Auto-Tune Pitch Fix (Right) */}
+                    <div className="pt-2 border-t border-white/5 grid sm:grid-cols-12 gap-2 items-center">
+                      {/* Dual Engine Switch: 7 cols */}
+                      <div className="sm:col-span-7 flex items-center gap-1.5">
+                        <span className="text-[10px] font-mono uppercase tracking-wider text-white/40 shrink-0 mr-1">Engine:</span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedEngine('rvc')}
+                          className={`flex-1 py-1.5 px-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-center justify-between ${
+                            selectedEngine === 'rvc'
+                              ? 'bg-[#e5a958]/20 border-[#e5a958] text-white ring-1 ring-[#e5a958]'
+                              : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-xs text-white">⚡ RVC v2</span>
+                            <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-[#e5a958]/15 text-[#e5a958]">48k Metal</span>
                           </div>
-                          <p className="text-[11px] text-white/50 mt-0.5 leading-snug">
-                            Automatically detects song key, steadies tremor/wobble, and moves notes onto the scale. Uncheck to preserve raw microtonal takes.
-                          </p>
-                        </div>
-                      </label>
+                          {selectedEngine === 'rvc' && <Check className="w-3 h-3 text-[#e5a958]" />}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setSelectedEngine('seedvc')}
+                          className={`flex-1 py-1.5 px-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-center justify-between ${
+                            selectedEngine === 'seedvc'
+                              ? 'bg-[#3fe0c5]/20 border-[#3fe0c5] text-white ring-1 ring-[#3fe0c5]'
+                              : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-xs text-white">🌱 Seed-VC</span>
+                            <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-[#3fe0c5]/15 text-[#3fe0c5]">44.1k DiT</span>
+                          </div>
+                          {selectedEngine === 'seedvc' && <Check className="w-3 h-3 text-[#3fe0c5]" />}
+                        </button>
+                      </div>
+
+                      {/* Pitch Fix Checkbox: 5 cols */}
+                      <div className="sm:col-span-5">
+                        <label className="flex items-center gap-2 py-1.5 px-2.5 rounded-lg bg-black/40 border border-white/10 hover:border-[#e5a958]/40 transition cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={fixPitch}
+                            onChange={(e) => setFixPitch(e.target.checked)}
+                            className="w-3.5 h-3.5 rounded border-white/20 text-[#e5a958] bg-black/60 cursor-pointer accent-[#e5a958]"
+                          />
+                          <span className="text-xs font-semibold text-white truncate">Fix Pitch & Auto-Tune</span>
+                          {fixPitch ? (
+                            <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded-full ml-auto">On</span>
+                          ) : (
+                            <span className="text-[9px] font-mono text-white/40 bg-white/5 px-1.5 py-0.2 rounded-full ml-auto">Raw</span>
+                          )}
+                        </label>
+                      </div>
                     </div>
                   </div>
 
                   {/* DOCK CONTENT STAGE: Shared audio preview element for all ingest methods */}
-                  <div className="min-h-[140px] sm:min-h-[160px] h-auto w-full flex flex-col justify-center my-1 flex-shrink-0">
+                  <div className="min-h-[110px] sm:min-h-[125px] h-auto w-full flex flex-col justify-center my-0.5 flex-shrink-0">
 
                     {/* Shared preview audio element for listening to recording or uploaded audio */}
                     <audio
@@ -2042,26 +1998,21 @@ export default function StudioView({
                               }
                             }}
                             onClick={() => fileInputRef.current?.click()}
-                            className={`h-full min-h-[190px] border-2 border-dashed rounded-2xl p-5 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-300 ${dragActive
+                            className={`border-2 border-dashed rounded-xl p-3 flex items-center justify-center gap-3 text-center cursor-pointer transition-all duration-300 ${dragActive
                                 ? 'border-[#e5a958] bg-[#e5a958]/10'
-                                : 'border-white/15 hover:border-white/30 bg-white/[0.035] hover:bg-white/[0.035]'
+                                : 'border-white/15 hover:border-white/30 bg-white/[0.03] hover:bg-white/[0.05]'
                               }`}
                           >
-                            <div className="space-y-2">
-                              <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-[#e5a958]">
-                                <Upload className="w-6 h-6" />
+                            <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-[#e5a958] shrink-0">
+                              <Upload className="w-4 h-4" />
+                            </div>
+                            <div className="text-left">
+                              <div className="text-xs sm:text-sm font-bold text-white">
+                                Drop vocal or song audio file here (or click to browse)
                               </div>
-                              <div className="text-base font-bold text-white">
-                                Drop your vocal or song audio file here
-                              </div>
-                              <p className="text-xs text-white/50 max-w-md mx-auto">
-                                Supports lossless WAV, MP3, FLAC, M4A, and OGG up to 100MB with automatic Sur Lock note fixing.
+                              <p className="text-[10px] text-white/50">
+                                Supports lossless WAV, MP3, FLAC, M4A, OGG up to 100MB with automatic Sur Lock note fixing.
                               </p>
-                              <div className="pt-1">
-                                <span className="inline-block px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-semibold">
-                                  Browse Files
-                                </span>
-                              </div>
                             </div>
                           </div>
                         )}
@@ -2070,51 +2021,49 @@ export default function StudioView({
 
                     {/* METHOD 2: Spotify Track URL */}
                     {ingestMethod === 'spotify' && (
-                      <div className="h-full flex flex-col justify-center space-y-3 bg-white/[0.035] p-5 sm:p-6 rounded-2xl border border-white/5">
-                        <div className="space-y-0.5">
-                          <label className="text-xs font-semibold text-white/90 uppercase tracking-wider block">
+                      <div className="flex flex-col justify-center space-y-2 bg-white/[0.035] p-3 rounded-xl border border-white/5">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-semibold text-white/90 uppercase tracking-wider block">
                             Spotify Song or Track Link
                           </label>
-                          <p className="text-xs text-white/50">
-                            Paste any track from Spotify Desktop or Mobile app (open.spotify.com/track/...)
-                          </p>
+                          <span className="text-[10px] text-white/40 font-mono">open.spotify.com/track/...</span>
                         </div>
 
-                        <div className="flex items-center gap-3 bg-white/[0.03] border border-white/10 rounded-2xl px-4 py-3 focus-within:border-green-500 transition-all shadow-inner">
-                          <span className="text-xs font-bold text-green-400 font-mono px-2 py-0.5 rounded bg-green-500/10 border border-green-500/20">
+                        <div className="flex items-center gap-2.5 bg-white/[0.03] border border-white/10 rounded-xl px-3 py-2 focus-within:border-green-500 transition-all shadow-inner">
+                          <span className="text-[10px] font-bold text-green-400 font-mono px-1.5 py-0.5 rounded bg-green-500/10 border border-green-500/20">
                             Spotify
                           </span>
                           <input
                             type="url"
-                            placeholder="https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
+                            placeholder="https://open.spotify.com/track/..."
                             value={spotifyUrl}
                             onChange={(e) => setSpotifyUrl(e.target.value)}
-                            className="bg-transparent text-sm text-white placeholder-white/40 focus:outline-none flex-1 font-mono"
+                            className="bg-transparent text-xs sm:text-sm text-white placeholder-white/40 focus:outline-none flex-1 font-mono"
                           />
                           {spotifyUrl && (
                             <button type="button" onClick={() => setSpotifyUrl('')} className="text-white/40 hover:text-white p-1">
-                              <X className="w-4 h-4" />
+                              <X className="w-3.5 h-3.5" />
                             </button>
                           )}
                         </div>
 
                         {isFetchingSpotify && (
-                          <div className="text-xs text-white/60 flex items-center gap-2 pt-0.5 font-mono">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-green-400" />
+                          <div className="text-[10px] text-white/60 flex items-center gap-1.5 font-mono">
+                            <Loader2 className="w-3 h-3 animate-spin text-green-400" />
                             <span>Resolving high-res track metadata and artwork...</span>
                           </div>
                         )}
 
                         {spotifyMeta && (
-                          <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white/5 border border-white/10">
+                          <div className="flex items-center gap-2.5 p-2 rounded-lg bg-white/5 border border-white/10">
                             {spotifyMeta.thumbnail && (
-                              <img src={spotifyMeta.thumbnail} alt={spotifyMeta.title} className="w-10 h-10 rounded-lg object-cover shadow-md" />
+                              <img src={spotifyMeta.thumbnail} alt={spotifyMeta.title} className="w-8 h-8 rounded object-cover shadow-sm" />
                             )}
                             <div className="flex-1 truncate space-y-0.5">
                               <div className="text-xs font-bold text-white truncate">{spotifyMeta.title}</div>
-                              <div className="text-[11px] text-white/60 truncate">{spotifyMeta.artist}</div>
+                              <div className="text-[10px] text-white/60 truncate">{spotifyMeta.artist}</div>
                             </div>
-                            <span className="text-[11px] text-green-400 font-mono px-2.5 py-0.5 rounded-full bg-green-500/10 border border-green-500/20">
+                            <span className="text-[10px] text-green-400 font-mono px-2 py-0.5 rounded-full bg-green-500/10 border border-green-500/20">
                               Matched
                             </span>
                           </div>
@@ -2124,18 +2073,16 @@ export default function StudioView({
 
                     {/* METHOD 3: YouTube Video URL */}
                     {ingestMethod === 'youtube' && (
-                      <div className="h-full flex flex-col justify-center space-y-3 bg-white/[0.035] p-5 sm:p-6 rounded-2xl border border-white/5">
-                        <div className="space-y-0.5">
-                          <label className="text-xs font-semibold text-white/90 uppercase tracking-wider block">
-                            YouTube Video or Music URL
+                      <div className="flex flex-col justify-center space-y-2 bg-white/[0.035] p-3 rounded-xl border border-white/5">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-semibold text-white/90 uppercase tracking-wider block">
+                            YouTube Video Link
                           </label>
-                          <p className="text-xs text-white/50">
-                            Paste any YouTube link. Audio stream is ingested directly in full 44.1kHz fidelity.
-                          </p>
+                          <span className="text-[10px] text-white/40 font-mono">youtube.com/watch?v=...</span>
                         </div>
 
-                        <div className="flex items-center gap-3 bg-white/[0.03] border border-white/10 rounded-2xl px-4 py-3 focus-within:border-red-500 transition-all shadow-inner">
-                          <span className="text-xs font-bold text-red-400 font-mono px-2 py-0.5 rounded bg-red-500/10 border border-red-500/20">
+                        <div className="flex items-center gap-2.5 bg-white/[0.03] border border-white/10 rounded-xl px-3 py-2 focus-within:border-red-500 transition-all shadow-inner">
+                          <span className="text-[10px] font-bold text-red-400 font-mono px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20">
                             YouTube
                           </span>
                           <input
@@ -2143,11 +2090,11 @@ export default function StudioView({
                             placeholder="https://www.youtube.com/watch?v=..."
                             value={youtubeUrl}
                             onChange={(e) => setYoutubeUrl(e.target.value)}
-                            className="bg-transparent text-sm text-white placeholder-white/40 focus:outline-none flex-1 font-mono"
+                            className="bg-transparent text-xs sm:text-sm text-white placeholder-white/40 focus:outline-none flex-1 font-mono"
                           />
                           {youtubeUrl && (
                             <button type="button" onClick={() => setYoutubeUrl('')} className="text-white/40 hover:text-white p-1">
-                              <X className="w-4 h-4" />
+                              <X className="w-3.5 h-3.5" />
                             </button>
                           )}
                         </div>
@@ -2318,27 +2265,13 @@ export default function StudioView({
 
                   </div>
 
-                  {/* Creative controls summary */}
-                  <div className="pt-3 flex-shrink-0 flex items-center gap-2">
-                    <div className="flex-1 min-w-0 truncate text-[11px] font-mono text-white/55 px-3 py-2 rounded-xl bg-black/30 border border-white/5">
-                      {creativeSummaryText}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={onOpenCreative}
-                      className="flex-shrink-0 px-4 py-2 rounded-xl border border-[#e5a958]/40 text-[#e5a958] text-xs font-semibold hover:bg-[#e5a958]/10 cursor-pointer flex items-center gap-1.5"
-                    >
-                      <Sliders className="w-3.5 h-3.5" /> Creative controls
-                    </button>
-                  </div>
-
                   {/* Submit Transform Button */}
-                  <div className="pt-3 flex-shrink-0">
+                  <div className="pt-2 flex-shrink-0">
                     <button
                       type="button"
                       onClick={handleConvertTrigger}
                       disabled={isSubmitting || !hasValidInput}
-                      className={`w-full py-4 rounded-2xl font-bold text-sm sm:text-base flex items-center justify-center gap-3 transition-all shadow-2xl ${isSubmitting || !hasValidInput
+                      className={`w-full py-3 sm:py-3.5 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2.5 transition-all shadow-xl ${isSubmitting || !hasValidInput
                           ? 'bg-white/10 text-white/30 cursor-not-allowed border border-white/5'
                           : 'bg-[#e5a958] hover:bg-[#f0bb6e] text-black cursor-pointer active:scale-[0.99] shadow-[#e5a958]/25'
                         }`}
