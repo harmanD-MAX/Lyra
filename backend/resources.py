@@ -111,39 +111,33 @@ def has_room_for(size_bytes: int, what: str = "model") -> bool:
     return True
 
 
-# Files a finished job still needs (playback, downloads, remix, section re-render)
+# Lean retention: keep only the essential finished outputs
+# 1. master_remastered.mp3 (the finished mastered song)
+# 2. converted_vocals.wav / vocal_processed.wav (the AI lead vocals)
+# 3. accompaniment.wav / instrumental.wav (the backing track)
+# 4. meta.json & pipeline_state.json (track title, artist, art)
 _KEEP = {
-    "meta.json", "pipeline_state.json", "analysis.json", "melody.mid",
-    "converted_vocals.wav", "harmony_vocals.wav", "vocals_with_harmony.wav",
-    "vocals_lead_dry.wav", "vocals_timing_aligned.wav", "accompaniment.wav", "instrumental.wav",
-    "vocal_processed.wav", "vocals.wav",
-    "master_remastered.mp3", "master_clean.mp3", "master_remastered.wav", "master_clean.wav",
+    "meta.json", "pipeline_state.json",
+    "master_remastered.mp3",
+    "converted_vocals.wav", "vocal_processed.wav",
+    "accompaniment.wav", "instrumental.wav",
 }
-_LITE_DROP = {"master_remastered.wav", "master_clean.wav", "vocal_processed.wav", "vocals.wav"}
 
 
 def cleanup_job(job_dir: str) -> float:
-    """Delete intermediates of a finished job. Returns MB freed."""
-    keep = _KEEP - _LITE_DROP if LITE else _KEEP
+    """Delete intermediates and uncompressed duplicates of a finished job. Returns MB freed."""
     freed = 0
     for name in os.listdir(job_dir):
         path = os.path.join(job_dir, name)
-        if name == "stems":
-            continue
-        if name == "guide" and os.path.isdir(path):
-            for g in os.listdir(path):
-                gp = os.path.join(path, g)
-                if g not in ("accompaniment.wav", "vocals_lead_dry.wav") and os.path.isfile(gp):
-                    freed += os.path.getsize(gp)
-                    os.remove(gp)
-                elif os.path.isdir(gp):
-                    freed += _dir_size(gp)
-                    shutil.rmtree(gp, ignore_errors=True)
+        # Drop redundant scratch directories
+        if name in ("guide", "stems") and os.path.isdir(path):
+            freed += _dir_size(path)
+            shutil.rmtree(path, ignore_errors=True)
             continue
         if os.path.isdir(path):
             freed += _dir_size(path)
             shutil.rmtree(path, ignore_errors=True)
-        elif name not in keep:
+        elif name not in _KEEP:
             freed += os.path.getsize(path)
             os.remove(path)
     return freed / 1e6

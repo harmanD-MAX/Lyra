@@ -553,17 +553,37 @@ async def engine_status():
 
 @app.get("/api/stems/{job_id}/all.zip")
 async def download_all_stems(job_id: str):
-    stems_dir = os.path.join(OUTPUTS_DIR, job_id, "stems")
-    if not os.path.isdir(stems_dir):
-        raise HTTPException(status_code=404, detail="No stems for this job")
-    zip_base = os.path.join(OUTPUTS_DIR, job_id, "lyra_stems")
-    extra = [os.path.join(OUTPUTS_DIR, job_id, f) for f in ("melody.mid", "analysis.json")]
-    staging = os.path.join(OUTPUTS_DIR, job_id, "_zip")
+    job_dir = os.path.join(OUTPUTS_DIR, job_id)
+    if not os.path.isdir(job_dir):
+        raise HTTPException(status_code=404, detail="No files found for this job")
+    zip_base = os.path.join(job_dir, "lyra_stems")
+    staging = os.path.join(job_dir, "_zip")
     shutil.rmtree(staging, ignore_errors=True)
-    shutil.copytree(stems_dir, staging)
+    os.makedirs(staging, exist_ok=True)
+
+    # Collect available stems directly from job_dir
+    stems_to_zip = {
+        "master_cover.mp3": "master_remastered.mp3",
+        "lead_vocals.wav": "converted_vocals.wav",
+        "instrumental.wav": "accompaniment.wav"
+    }
+    for dest_name, src_name in stems_to_zip.items():
+        src_path = os.path.join(job_dir, src_name)
+        if os.path.exists(src_path):
+            shutil.copy(src_path, os.path.join(staging, dest_name))
+
+    stems_dir = os.path.join(job_dir, "stems")
+    if os.path.isdir(stems_dir):
+        for f in os.listdir(stems_dir):
+            sp = os.path.join(stems_dir, f)
+            if os.path.isfile(sp):
+                shutil.copy(sp, os.path.join(staging, f))
+
+    extra = [os.path.join(job_dir, f) for f in ("melody.mid", "analysis.json", "meta.json")]
     for f in extra:
         if os.path.exists(f):
             shutil.copy(f, staging)
+
     path = shutil.make_archive(zip_base, "zip", staging)
     shutil.rmtree(staging, ignore_errors=True)
     return FileResponse(path, media_type="application/zip", filename=f"Lyra_{job_id}_stems.zip")
@@ -573,7 +593,19 @@ async def download_all_stems(job_id: str):
 async def get_stem(job_id: str, stem: str, request: Request, download: bool = False):
     if not stem.replace("_", "").isalnum():
         raise HTTPException(status_code=400, detail="Invalid stem name")
-    path = os.path.join(OUTPUTS_DIR, job_id, "stems", f"{stem}.wav")
+    job_dir = os.path.join(OUTPUTS_DIR, job_id)
+    path = os.path.join(job_dir, "stems", f"{stem}.wav")
+    if not os.path.exists(path):
+        # Fallback to stems stored directly in job_dir
+        alt_map = {
+            "lead_vocal_converted": "converted_vocals.wav",
+            "vocals": "converted_vocals.wav",
+            "accompaniment": "accompaniment.wav",
+            "instrumental": "accompaniment.wav"
+        }
+        alt = alt_map.get(stem)
+        if alt and os.path.exists(os.path.join(job_dir, alt)):
+            path = os.path.join(job_dir, alt)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Stem not found")
     return stream_audio_file(path, request, "audio/wav", download=download, download_filename=f"Lyra_{stem}.wav")
