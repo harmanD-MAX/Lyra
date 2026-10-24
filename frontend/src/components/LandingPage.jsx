@@ -1,9 +1,16 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight, AudioWaveform, ChevronDown, Download, FileMusic, Layers, Mic2, Music4,
   Scissors, Sparkles, Wand2, Waves, Users, SlidersHorizontal, Gauge,
 } from 'lucide-react';
 import LyraLogo from './LyraLogo';
+import Glyph3D from './three/Glyph3D';
+
+// three.js scenes load in their own chunk so the page text appears instantly
+const VoiceOrbLazy = lazy(() => import('./three/VoiceOrb'));
+const PitchRibbonLazy = lazy(() => import('./three/PitchRibbon'));
+const VoiceOrb = (props) => <Suspense fallback={null}><VoiceOrbLazy {...props} /></Suspense>;
+const PitchRibbon = (props) => <Suspense fallback={null}><PitchRibbonLazy {...props} /></Suspense>;
 
 const GOLD = '#e5a958';
 const TEAL = '#3fe0c5';
@@ -72,62 +79,6 @@ function TiltCard({ children, className = '', glow = GOLD, onClick }) {
       {children}
     </div>
   );
-}
-
-/** Live waveform ribbon on a canvas; amplitude follows the cursor. */
-function WaveCanvas({ energy }) {
-  const ref = useRef(null);
-  const energyRef = useRef(energy);
-  useEffect(() => { energyRef.current = energy; }, [energy]);
-  useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    let raf;
-    let t = 0;
-    let smooth = 0.4;
-    const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = canvas.clientWidth * dpr;
-      canvas.height = canvas.clientHeight * dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    };
-    resize();
-    window.addEventListener('resize', resize);
-    const still = prefersReducedMotion();
-    const draw = () => {
-      const w = canvas.clientWidth;
-      const h = canvas.clientHeight;
-      smooth += (energyRef.current - smooth) * 0.05;
-      ctx.clearRect(0, 0, w, h);
-      const lines = [
-        { color: 'rgba(229,169,88,0.85)', amp: 0.34, freq: 1.6, speed: 1.0, width: 2 },
-        { color: 'rgba(63,224,197,0.55)', amp: 0.26, freq: 2.3, speed: 1.4, width: 1.5 },
-        { color: 'rgba(255,255,255,0.18)', amp: 0.2, freq: 3.1, speed: 0.7, width: 1 },
-      ];
-      for (const L of lines) {
-        ctx.beginPath();
-        for (let x = 0; x <= w; x += 3) {
-          const p = x / w;
-          const env = Math.sin(Math.PI * p) ** 1.5;
-          const y = h / 2
-            + Math.sin(p * Math.PI * 2 * L.freq + t * L.speed) * h * L.amp * env * (0.35 + smooth)
-            + Math.sin(p * Math.PI * 9 + t * 2.2 * L.speed) * h * 0.04 * env * smooth;
-          if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        }
-        ctx.strokeStyle = L.color;
-        ctx.lineWidth = L.width;
-        ctx.shadowColor = L.color;
-        ctx.shadowBlur = 12;
-        ctx.stroke();
-      }
-      t += 0.022;
-      if (!still) raf = requestAnimationFrame(draw);
-    };
-    draw();
-    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', resize); };
-  }, []);
-  return <canvas ref={ref} className="absolute inset-0 w-full h-full" aria-hidden="true" />;
 }
 
 /* ---------------------------------------------------------------------------
@@ -241,17 +192,17 @@ function PitchDemo() {
  * ------------------------------------------------------------------------- */
 
 const VOICES = [
-  { key: 'arijit_singh', name: 'Arijit Singh', tag: 'Soulful • warm chest voice', style: 'Meend glides, delayed vibrato bloom', color: GOLD, img: '/neural_vocal_core.jpg' },
-  { key: 'sonu_nigam', name: 'Sonu Nigam', tag: 'Classical • crystal high register', style: 'Harkat & murki on note changes', color: TEAL, img: '/neural_timbre_matrix.jpg' },
-  { key: 'kk', name: 'KK', tag: 'Rock & soul • belting power', style: 'Straight-tone push, late vibrato', color: '#f472b6', img: '/neural_mesh.jpg' },
+  { key: 'arijit_singh', name: 'Arijit Singh', tag: 'Soulful • warm chest voice', style: 'Meend glides, delayed vibrato bloom', color: GOLD, colorB: '#ff8a5c', rate: 5.15 },
+  { key: 'sonu_nigam', name: 'Sonu Nigam', tag: 'Classical • crystal high register', style: 'Harkat & murki on note changes', color: TEAL, colorB: '#7aa2ff', rate: 5.95 },
+  { key: 'kk', name: 'KK', tag: 'Rock & soul • belting power', style: 'Straight-tone push, late vibrato', color: '#f472b6', colorB: '#a78bfa', rate: 5.75 },
 ];
 
 const PIPELINE = [
-  { icon: Scissors, title: 'Separate', body: 'Mel-Band RoFormer pulls the vocal out, then splits lead from backing harmonies.', img: '/neural_mesh.jpg' },
-  { icon: Waves, title: 'Clean', body: 'De-reverb strips room tails so the voice model hears only the voice.', img: '/neural_waveform.jpg' },
-  { icon: Music4, title: 'Melody engine', body: 'Key detection, note-level tuning, guide-melody & timing alignment — on the pitch curve.', img: '/neural_timbre_matrix.jpg' },
-  { icon: Mic2, title: 'Render', body: 'Synthesized once: as a singer, your trained voice, or your untouched timbre.', img: '/neural_vocal_core.jpg' },
-  { icon: Layers, title: 'Mix & export', body: 'Master, 24-bit stems, MIDI melody, key & BPM — ready for your DAW.', img: '/studio_mastering_rack.jpg' },
+  { icon: Scissors, title: 'Separate', body: 'Mel-Band RoFormer pulls the vocal out, then splits lead from backing harmonies.', glyph: 'separate' },
+  { icon: Waves, title: 'Clean', body: 'De-reverb strips room tails so the voice model hears only the voice.', glyph: 'clean' },
+  { icon: Music4, title: 'Melody engine', body: 'Key detection, note-level tuning, guide-melody & timing alignment — on the pitch curve.', glyph: 'melody' },
+  { icon: Mic2, title: 'Render', body: 'Synthesized once: as a singer, your trained voice, or your untouched timbre.', glyph: 'render' },
+  { icon: Layers, title: 'Mix & export', body: 'Master, 24-bit stems, MIDI melody, key & BPM — ready for your DAW.', glyph: 'export' },
 ];
 
 const HERO_WORDS = ['Arijit', 'Sonu', 'KK', 'yourself'];
@@ -265,106 +216,83 @@ const FAQ = [
 ];
 
 export default function LandingPage({ onLaunchStudio }) {
-  const [energy, setEnergy] = useState(0.4);
-  const [parallax, setParallax] = useState({ x: 0, y: 0 });
-  const [scrollY, setScrollY] = useState(0);
   const [openFaq, setOpenFaq] = useState(0);
   const [wordIdx, setWordIdx] = useState(0);
 
   useEffect(() => {
-    const onScroll = () => setScrollY(window.scrollY);
-    window.addEventListener('scroll', onScroll, { passive: true });
-    const id = prefersReducedMotion() ? null : setInterval(() => setWordIdx((i) => (i + 1) % HERO_WORDS.length), 2200);
-    return () => { window.removeEventListener('scroll', onScroll); if (id) clearInterval(id); };
+    if (prefersReducedMotion()) return undefined;
+    const id = setInterval(() => setWordIdx((i) => (i + 1) % HERO_WORDS.length), 2200);
+    return () => clearInterval(id);
   }, []);
-
-  const onHeroMove = (e) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    const nx = (e.clientX - r.left) / r.width - 0.5;
-    const ny = (e.clientY - r.top) / r.height - 0.5;
-    setParallax({ x: nx, y: ny });
-    setEnergy(0.25 + Math.min(1, Math.hypot(nx, ny) * 1.6) * 0.75);
-  };
 
   const launch = (model, opts) => onLaunchStudio && onLaunchStudio(model, opts);
 
   return (
     <main className="relative bg-[#07080a] text-white overflow-x-hidden">
       {/* ================================================================ HERO */}
-      <section
-        id="hero"
-        onMouseMove={onHeroMove}
-        onMouseLeave={() => { setParallax({ x: 0, y: 0 }); setEnergy(0.4); }}
-        className="relative min-h-[100svh] flex items-center justify-center overflow-hidden pt-24 pb-16 px-4 sm:px-6"
-      >
-        <div
-          className="absolute inset-[-6%] bg-cover bg-center will-change-transform"
-          style={{
-            backgroundImage: "url('/lyra_studio_bg.jpg')",
-            transform: `translate3d(${parallax.x * -24}px, ${parallax.y * -16 + scrollY * 0.25}px, 0) scale(1.08)`,
-            transition: 'transform 600ms cubic-bezier(.2,.7,.2,1)',
-          }}
-        />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(7,8,10,0.35)_0%,rgba(7,8,10,0.85)_65%,#07080a_100%)]" />
-        <div className="absolute inset-x-0 top-[38%] h-[34%] opacity-90">
-          <WaveCanvas energy={energy} />
-        </div>
-        <div className="aurora pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[900px] h-[500px]" />
-
-        <div className="relative z-10 max-w-5xl text-center">
-          <Reveal>
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/40 backdrop-blur px-4 py-1.5 text-xs tracking-[0.2em] uppercase text-white/70">
-              <Sparkles className="w-3.5 h-3.5" style={{ color: GOLD }} /> Neural vocal studio
-            </span>
-          </Reveal>
-          <Reveal delay={120}>
-            <h1 className="hero-title mt-6 text-[clamp(2.6rem,7vw,6rem)] leading-[0.95] font-bold tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-              Sing it badly.<br />
-              <span className="text-white/90">Hear it as </span>
-              <span className="relative inline-block min-w-[4ch] text-left">
-                {HERO_WORDS.map((w, i) => (
-                  <span
-                    key={w}
-                    className={`absolute left-0 top-0 whitespace-nowrap bg-clip-text text-transparent transition-all ${i === wordIdx ? 'opacity-100 translate-y-0 blur-0 duration-700 delay-300' : 'opacity-0 -translate-y-5 blur-sm duration-300'}`}
-                    style={{ backgroundImage: `linear-gradient(100deg, ${GOLD}, #ffe2b0 45%, ${TEAL})` }}
-                  >
-                    {w}.
-                  </span>
-                ))}
-                <span className="invisible">yourself.</span>
+      <section id="hero" className="relative min-h-[100svh] flex items-center overflow-hidden pt-24 pb-16 px-4 sm:px-6">
+        <div className="hero-grid absolute inset-0" />
+        <div className="aurora pointer-events-none absolute -top-40 right-[-10%] w-[900px] h-[600px]" />
+        <div className="relative z-10 max-w-7xl mx-auto w-full grid lg:grid-cols-[1.05fr_1fr] gap-6 items-center">
+          {/* text column: always on plain dark background */}
+          <div className="order-2 lg:order-1 text-center lg:text-left">
+            <Reveal>
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-4 py-1.5 text-xs tracking-[0.2em] uppercase text-white/70">
+                <Sparkles className="w-3.5 h-3.5" style={{ color: GOLD }} /> Neural vocal studio
               </span>
-            </h1>
-          </Reveal>
-          <Reveal delay={240}>
-            <p className="mx-auto mt-6 max-w-2xl text-base sm:text-lg text-white/70 leading-relaxed">
-              Lyra fixes your pitch and timing against the original song, then sings it back in your own voice —
-              or as a legend. Studio stems and MIDI included.
-            </p>
-          </Reveal>
-          <Reveal delay={360}>
-            <div className="mt-10 flex flex-col sm:flex-row gap-3 justify-center">
-              <button type="button" onClick={() => launch(undefined, { mode: 'my_voice' })} className="shine-btn group inline-flex items-center justify-center gap-2 rounded-full bg-[#e5a958] text-black font-semibold px-7 py-3.5 cursor-pointer">
-                <Mic2 className="w-4 h-4" /> Try My Voice
-                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-              </button>
-              <button type="button" onClick={() => launch('arijit_singh', { mode: 'convert' })} className="inline-flex items-center justify-center gap-2 rounded-full border border-white/20 bg-black/40 backdrop-blur px-7 py-3.5 text-white/90 hover:border-white/50 transition cursor-pointer">
-                <AudioWaveform className="w-4 h-4" /> Convert a song
-              </button>
+            </Reveal>
+            <Reveal delay={120}>
+              <h1 className="mt-6 text-[clamp(2.6rem,6.2vw,5.6rem)] leading-[0.95] font-bold tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+                Sing it badly.<br />
+                <span className="text-white/90">Hear it as </span>
+                <span className="relative inline-block min-w-[4ch] text-left">
+                  {HERO_WORDS.map((w, i) => (
+                    <span
+                      key={w}
+                      className={`absolute left-0 top-0 whitespace-nowrap bg-clip-text text-transparent transition-all ${i === wordIdx ? 'opacity-100 translate-y-0 blur-0 duration-700 delay-300' : 'opacity-0 -translate-y-5 blur-sm duration-300'}`}
+                      style={{ backgroundImage: `linear-gradient(100deg, ${GOLD}, #ffe2b0 45%, ${TEAL})` }}
+                    >
+                      {w}.
+                    </span>
+                  ))}
+                  <span className="invisible">yourself.</span>
+                </span>
+              </h1>
+            </Reveal>
+            <Reveal delay={240}>
+              <p className="mx-auto lg:mx-0 mt-6 max-w-xl text-base sm:text-lg text-white/65 leading-relaxed">
+                Lyra fixes your pitch and timing against the original song, then sings it back in your own voice —
+                or as a legend. Studio stems and MIDI included.
+              </p>
+            </Reveal>
+            <Reveal delay={360}>
+              <div className="mt-10 flex flex-col sm:flex-row gap-3 justify-center lg:justify-start">
+                <button type="button" onClick={() => launch(undefined, { mode: 'my_voice' })} className="shine-btn group inline-flex items-center justify-center gap-2 rounded-full bg-[#e5a958] text-black font-semibold px-7 py-3.5 cursor-pointer">
+                  <Mic2 className="w-4 h-4" /> Try My Voice
+                  <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+                </button>
+                <button type="button" onClick={() => launch('arijit_singh', { mode: 'convert' })} className="inline-flex items-center justify-center gap-2 rounded-full border border-white/20 bg-white/[0.03] px-7 py-3.5 text-white/90 hover:border-white/50 transition cursor-pointer">
+                  <AudioWaveform className="w-4 h-4" /> Convert a song
+                </button>
+              </div>
+            </Reveal>
+          </div>
+
+          {/* 3D voice orb */}
+          <div className="order-1 lg:order-2 relative h-[300px] sm:h-[420px] lg:h-[640px]">
+            <VoiceOrb className="absolute inset-0" scale={0.88} />
+            <div className="hidden md:block">
+              {[
+                { t: 'Key detected · C# minor', c: 'left-[4%] top-[16%]', d: '0s' },
+                { t: '+38¢ → 0¢', c: 'right-[6%] top-[28%]', d: '1.2s' },
+                { t: 'Timing aligned to original', c: 'left-[8%] bottom-[14%]', d: '2.1s' },
+                { t: 'Stems · MIDI · 24-bit', c: 'right-[4%] bottom-[22%]', d: '0.6s' },
+              ].map((chip) => (
+                <span key={chip.t} className={`float-chip absolute ${chip.c} rounded-full border border-white/10 bg-black/60 backdrop-blur px-3 py-1.5 text-[11px] font-mono text-white/70`} style={{ animationDelay: chip.d }}>
+                  {chip.t}
+                </span>
+              ))}
             </div>
-          </Reveal>
-
-          {/* floating telemetry chips */}
-          <div className="hidden md:block">
-            {[
-              { t: 'Key detected · C# minor', c: 'left-[-6%] top-[18%]', d: '0s' },
-              { t: '+38¢ → 0¢', c: 'right-[-4%] top-[30%]', d: '1.2s' },
-              { t: 'Timing aligned to original', c: 'left-[2%] bottom-[-14%]', d: '2.1s' },
-              { t: 'Stems · MIDI · 24-bit', c: 'right-[4%] bottom-[-10%]', d: '0.6s' },
-            ].map((chip) => (
-              <span key={chip.t} className={`float-chip absolute ${chip.c} rounded-full border border-white/10 bg-black/50 backdrop-blur px-3 py-1.5 text-[11px] font-mono text-white/70`} style={{ animationDelay: chip.d }}>
-                {chip.t}
-              </span>
-            ))}
           </div>
         </div>
 
@@ -403,8 +331,7 @@ export default function LandingPage({ onLaunchStudio }) {
 
       {/* ============================================================ MY VOICE */}
       <section id="myvoice" className="relative py-24 sm:py-32 px-4 sm:px-6 overflow-hidden">
-        <div className="absolute inset-0 opacity-[0.18] bg-cover bg-center" style={{ backgroundImage: "url('/studio_vocal_booth.jpg')", transform: `translateY(${(scrollY - 1400) * 0.08}px)` }} />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#07080a] via-[#07080a]/70 to-[#07080a]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_80%_50%,rgba(229,169,88,0.08),transparent_60%)]" />
         <div className="relative max-w-6xl mx-auto grid lg:grid-cols-2 gap-14 items-center">
           <div>
             <Reveal>
@@ -437,11 +364,15 @@ export default function LandingPage({ onLaunchStudio }) {
             </Reveal>
           </div>
           <Reveal delay={200}>
-            <TiltCard className="aspect-[4/5] sm:aspect-[5/5]" glow={GOLD}>
-              <img src="/studio_singer_guy.jpg" alt="Singer recording a take in the vocal booth" className="absolute inset-0 w-full h-full object-cover scale-105 group-hover:scale-110 transition-transform duration-[1200ms]" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent" />
+            <TiltCard className="aspect-[4/5] sm:aspect-[5/5] bg-[radial-gradient(circle_at_50%_40%,#15181d,#07080a)]" glow={GOLD}>
+              <PitchRibbon className="absolute inset-0" />
+              <div className="absolute top-5 left-6 right-6 flex justify-between text-[11px] font-mono">
+                <span className="text-rose-300/80">your take</span>
+                <span style={{ color: TEAL }}>after Lyra</span>
+              </div>
+              <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black via-black/60 to-transparent" />
               <div className="absolute bottom-0 inset-x-0 p-6 space-y-3">
-                {[['Target', 'Your voice · personal model'], ['Guide', 'Original song · timing + melody'], ['Correction', '85% · steadiness 60%']].map(([k, v]) => (
+                {[['Target', 'Your voice'], ['Sound', 'Polished · in tune & steady']].map(([k, v]) => (
                   <div key={k} className="flex justify-between items-center rounded-xl bg-black/50 backdrop-blur border border-white/10 px-4 py-2.5 text-sm">
                     <span className="text-white/50">{k}</span><span className="font-medium">{v}</span>
                   </div>
@@ -464,9 +395,9 @@ export default function LandingPage({ onLaunchStudio }) {
           <div className="mt-14 grid sm:grid-cols-2 lg:grid-cols-5 gap-4">
             {PIPELINE.map((s, i) => (
               <Reveal key={s.title} delay={i * 100}>
-                <TiltCard className="h-full min-h-[320px]" glow={i % 2 ? TEAL : GOLD}>
-                  <img src={s.img} alt="" className="absolute inset-0 w-full h-full object-cover opacity-30 group-hover:opacity-50 group-hover:scale-110 transition-all duration-[1000ms]" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-black/20" />
+                <TiltCard className="h-full min-h-[380px]" glow={i % 2 ? TEAL : GOLD}>
+                  <Glyph3D kind={s.glyph} colorA={i % 2 ? TEAL : GOLD} colorB={i % 2 ? GOLD : TEAL} className="absolute inset-x-0 top-12 h-40 opacity-80 group-hover:opacity-100 transition-opacity" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent pointer-events-none" />
                   <div className="relative h-full flex flex-col p-5">
                     <div className="flex items-center justify-between">
                       <span className="w-10 h-10 rounded-2xl grid place-items-center bg-white/10 border border-white/15">
@@ -497,14 +428,9 @@ export default function LandingPage({ onLaunchStudio }) {
             {VOICES.map((v, i) => (
               <Reveal key={v.key} delay={i * 100}>
                 <TiltCard className="h-[420px]" glow={v.color} onClick={() => launch(v.key, { mode: 'convert' })}>
-                  <img src={v.img} alt="" className="absolute inset-0 w-full h-full object-cover opacity-40 grayscale group-hover:grayscale-0 group-hover:opacity-60 group-hover:scale-105 transition-all duration-[900ms]" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-transparent" />
+                  <Glyph3D kind="voice" colorA={v.color} colorB={v.colorB} rate={v.rate} tilt={0.55} zoom={1.0} className="absolute inset-x-0 top-10 h-52 opacity-85 group-hover:opacity-100 transition-opacity" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent pointer-events-none" />
                   <div className="relative h-full p-6 flex flex-col">
-                    <div className="flex items-end gap-1 h-10">
-                      {Array.from({ length: 18 }).map((_, k) => (
-                        <span key={k} className="eq-bar w-1 rounded-full" style={{ background: v.color, animationDelay: `${(k * 97) % 900}ms`, height: `${30 + ((k * 37) % 70)}%` }} />
-                      ))}
-                    </div>
                     <div className="mt-auto">
                       <h3 className="text-2xl font-bold" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{v.name}</h3>
                       <p className="text-sm mt-1" style={{ color: v.color }}>{v.tag}</p>
@@ -517,10 +443,11 @@ export default function LandingPage({ onLaunchStudio }) {
             ))}
             <Reveal delay={300}>
               <TiltCard className="h-[420px] border-dashed border-[#e5a958]/40" glow={GOLD} onClick={() => launch(undefined, { mode: 'my_voice', openVoiceLab: true })}>
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,rgba(229,169,88,0.18),transparent_60%)]" />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,rgba(229,169,88,0.14),transparent_60%)]" />
+                <Glyph3D kind="render" className="absolute inset-x-0 top-6 h-56 opacity-90" />
                 <div className="relative h-full p-6 flex flex-col">
-                  <div className="pulse-ring w-20 h-20 rounded-full grid place-items-center border border-[#e5a958]/50 mx-auto mt-10">
-                    <Users className="w-8 h-8" style={{ color: GOLD }} />
+                  <div className="pulse-ring w-14 h-14 rounded-full grid place-items-center border border-[#e5a958]/50 mx-auto mt-24 bg-black/50 backdrop-blur">
+                    <Users className="w-6 h-6" style={{ color: GOLD }} />
                   </div>
                   <div className="mt-auto">
                     <h3 className="text-2xl font-bold" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Your Voice</h3>
@@ -537,8 +464,8 @@ export default function LandingPage({ onLaunchStudio }) {
 
       {/* =========================================================== COMPOSERS */}
       <section id="composers" className="relative py-24 sm:py-32 px-4 sm:px-6 overflow-hidden">
-        <div className="absolute inset-0 opacity-25 bg-cover bg-center" style={{ backgroundImage: "url('/neural_waveform.jpg')" }} />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#07080a] via-[#07080a]/80 to-[#07080a]" />
+        <div className="hero-grid absolute inset-0 opacity-60" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_30%,rgba(63,224,197,0.08),transparent_55%)]" />
         <div className="relative max-w-6xl mx-auto">
           <Reveal>
             <p className="text-xs tracking-[0.3em] uppercase" style={{ color: TEAL }}>For composers & musicians</p>
@@ -591,8 +518,8 @@ export default function LandingPage({ onLaunchStudio }) {
 
       {/* ================================================================= CTA */}
       <section className="relative py-32 px-4 sm:px-6 overflow-hidden">
-        <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: "url('/lyra_balcony_bg.jpg')", transform: `translateY(${(scrollY - 4200) * 0.1}px) scale(1.1)` }} />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#07080a] via-black/50 to-[#07080a]" />
+        <VoiceOrb className="absolute inset-0 opacity-35" scale={1.25} interactive={false} colorA="#3fe0c5" colorB="#e5a958" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(7,8,10,0.55),#07080a_70%)]" />
         <Reveal className="relative max-w-3xl mx-auto text-center">
           <div className="flex justify-center"><LyraLogo /></div>
           <h2 className="mt-6 text-4xl sm:text-6xl font-bold tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Your song is waiting.</h2>
