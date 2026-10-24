@@ -986,7 +986,6 @@ export default function StudioView({
   const ringSinger = SINGERS.find((sg) => singerName.toLowerCase().includes(sg.name.toLowerCase().split(' ')[0].toLowerCase()));
   const ringColor = hexToRgb(ringSinger?.color || '#a78bfa');
   const ringInitials = ringSinger?.initials || (selectedModel === 'raw' ? 'You' : singerName.slice(0, 2).toUpperCase());
-  const engineLabel = selectedEngine === 'seedvc' ? 'Seed-VC · 44.1 kHz' : 'RVC v2 · 48 kHz';
   const isRecordedTake = Boolean(audioFile && audioFile.name?.startsWith('vocal_recording_'));
 
   return (
@@ -2011,11 +2010,10 @@ export default function StudioView({
                     className={`btn btn-lg w-full flex-shrink-0 ${isSubmitting || !hasValidInput ? 'btn-secondary' : 'btn-primary shine-btn'}`}
                   >
                     {isSubmitting ? (
-                      <><span className="eq-loader"><span /><span /><span /><span /></span> Rendering with {singerName}…</>
+                      <><span className="eq-loader"><span /><span /><span /><span /></span> Converting…</>
                     ) : (
                       <>
-                        <Sparkles /> Render with {singerName}
-                        <span className="hidden sm:inline font-mono text-xs font-medium opacity-70">· {engineLabel}</span>
+                        <Sparkles /> Convert song
                         <ArrowRight />
                       </>
                     )}
