@@ -6,11 +6,11 @@ from botocore.config import Config
 
 logger = logging.getLogger("lyra_r2")
 
-R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID", "")
-R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
-R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
-R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "")
-R2_CUSTOM_DOMAIN = os.environ.get("R2_CUSTOM_DOMAIN", "") # Optional e.g. https://music.yourdomain.com or r2.dev
+R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID", "21bb43135d8c5a440c019505b8046f43")
+R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "6b0f6d0856a02f517f0f0ded8bfd9d82")
+R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "187abc7d1282c047a5ce8011c4f32f1e8b4f2a4d5b348d82eab3ee62bfca7f8e")
+R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "lyra-music-storage")
+R2_CUSTOM_DOMAIN = os.environ.get("R2_CUSTOM_DOMAIN", "https://pub-168b6b7267cf42d0bebbf2ce062dbf9d.r2.dev")
 
 
 def is_r2_configured() -> bool:
@@ -111,3 +111,41 @@ def get_r2_presigned_url(remote_key: str, expires_in: int = 86400) -> Optional[s
     except Exception as e:
         logger.error(f"Error generating presigned URL for {remote_key}: {e}")
         return None
+
+
+def get_cloud_catalog() -> dict:
+    """Fetches the global cloud_catalog.json from Cloudflare R2 bucket."""
+    if not is_r2_configured():
+        return {}
+    client = get_r2_client()
+    if not client:
+        return {}
+    try:
+        import json
+        resp = client.get_object(Bucket=R2_BUCKET_NAME, Key="cloud_catalog.json")
+        content = resp["Body"].read().decode("utf-8")
+        return json.loads(content)
+    except Exception:
+        return {}
+
+
+def save_cloud_catalog(catalog: dict) -> bool:
+    """Saves the global cloud_catalog.json to Cloudflare R2 bucket."""
+    if not is_r2_configured():
+        return False
+    client = get_r2_client()
+    if not client:
+        return False
+    try:
+        import json
+        data = json.dumps(catalog, indent=2).encode("utf-8")
+        client.put_object(
+            Bucket=R2_BUCKET_NAME,
+            Key="cloud_catalog.json",
+            Body=data,
+            ContentType="application/json"
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save cloud catalog to R2: {e}")
+        return False

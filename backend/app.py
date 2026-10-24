@@ -820,6 +820,22 @@ async def save_job_to_cloud(job_id: str):
         except Exception as e:
             print("Error updating meta.json:", e)
 
+    # Update central R2 cloud catalog so all environments (Colab, Mac, Web) stay in sync
+    try:
+        catalog = r2_storage.get_cloud_catalog()
+        catalog[job_id] = {
+            "id": job_id,
+            "status": "completed",
+            "progress": 100,
+            "created_at": job.get("created_at", time.time()),
+            "updated_at": time.time(),
+            "metadata": job.get("metadata", {}),
+            "results": job.get("results", {})
+        }
+        r2_storage.save_cloud_catalog(catalog)
+    except Exception as e:
+        print("Error saving cloud catalog to R2:", e)
+
     # Clean up ALL heavy temporary local stems and uncompressed WAVs from outputs folder
     # Cloudflare R2 stores the single Master 3D MP3, so local outputs only needs meta.json (1 KB)
     for fname in os.listdir(job_dir):
@@ -846,6 +862,14 @@ async def delete_job(job_id: str):
     job_dir = os.path.join(OUTPUTS_DIR, job_id)
     if os.path.exists(job_dir):
         shutil.rmtree(job_dir, ignore_errors=True)
+    # Remove from cloud catalog if present
+    try:
+        catalog = r2_storage.get_cloud_catalog()
+        if job_id in catalog:
+            del catalog[job_id]
+            r2_storage.save_cloud_catalog(catalog)
+    except Exception:
+        pass
     if not success:
         raise HTTPException(status_code=404, detail="Job not found")
     return JSONResponse(content={"status": "deleted", "job_id": job_id})
