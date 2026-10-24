@@ -58,11 +58,13 @@ void main(){
  * A living "voice" orb: noise-displaced sphere, particle halo and orbit rings.
  * Reacts to the cursor; pauses when off-screen.
  */
-export default function VoiceOrb({ className = '', colorA = '#e5a958', colorB = '#3fe0c5', scale = 1, interactive = true }) {
+export default function VoiceOrb({ className = '', colorA = '#e5a958', colorB = '#3fe0c5', scale = 1, interactive = true, active = false }) {
   const [wrapRef, inView] = useInView();
   const mountRef = useRef(null);
   const inViewRef = useRef(inView);
+  const activeRef = useRef(active);
   useEffect(() => { inViewRef.current = inView; }, [inView]);
+  useEffect(() => { activeRef.current = active; }, [active]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -156,8 +158,10 @@ export default function VoiceOrb({ className = '', colorA = '#e5a958', colorB = 
       if (!inViewRef.current && !still) return;
       const t = clock.getElapsedTime();
       uniforms.uTime.value = t;
-      uniforms.uEnergy.value += (target.e - uniforms.uEnergy.value) * 0.04;
-      group.rotation.y += ((target.x * 0.8 + t * 0.08) - group.rotation.y) * 0.03;
+      // `active` (playing / recording / rendering) makes the orb pulse like a voice
+      const goal = activeRef.current ? 0.95 + 0.35 * Math.abs(Math.sin(t * 3.1) * Math.sin(t * 1.7)) : target.e;
+      uniforms.uEnergy.value += (goal - uniforms.uEnergy.value) * (activeRef.current ? 0.12 : 0.04);
+      group.rotation.y += ((target.x * 0.8 + t * (activeRef.current ? 0.22 : 0.08)) - group.rotation.y) * 0.03;
       group.rotation.x += (target.y * 0.5 - group.rotation.x) * 0.03;
       points.rotation.y = t * 0.04;
       wire.rotation.z = -t * 0.05;
