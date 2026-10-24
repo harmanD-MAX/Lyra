@@ -1,4 +1,8 @@
 import os
+# Prevent virtual memory fragmentation and disable CUDA Graphs for full-track audio
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+os.environ.setdefault("RVC_CUDA_GRAPH", "0")
+
 import time
 import json
 import shutil
