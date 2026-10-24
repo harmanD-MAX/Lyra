@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react';
 import LyraLogo from './LyraLogo';
 import {
   Compass, Music2, Play, Pause,
@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import ProcessingStatus from './ProcessingStatus';
 import ComposerTools from './ComposerTools';
+import LiveSpectrum from './audio/LiveSpectrum';
+import { decodeTrack } from './audio/spectrum';
 const VoiceOrb = lazy(() => import('./three/VoiceOrb'));
 
 const GOLD = '#e5a958';
@@ -461,6 +463,24 @@ export default function StudioView({
   };
 
   const getAudioSource = () => getStemSource(activeTrack);
+
+  // Decoded samples of the stem that's playing, for the live visualizer
+  const [decodedEntry, setDecodedEntry] = useState(null);
+  const audioLevelRef = useRef(0);
+  const activeStemSrc = currentJob?.id && currentResults ? getStemSource(activeTrack) : '';
+  useEffect(() => {
+    if (!activeStemSrc) return undefined;
+    let alive = true;
+    decodeTrack(activeStemSrc)
+      .then((t) => { if (alive) setDecodedEntry({ src: activeStemSrc, track: t }); })
+      .catch(() => { });
+    return () => { alive = false; };
+  }, [activeStemSrc]);
+  const decoded = decodedEntry?.src === activeStemSrc ? decodedEntry.track : null;
+  const getPlayheadTime = useCallback(
+    () => stemAudiosRef.current[activeTrack]?.currentTime || 0,
+    [activeTrack],
+  );
 
   // Auto-preload all stem audio elements in parallel as soon as job completes
   useEffect(() => {
@@ -1283,7 +1303,7 @@ export default function StudioView({
                   {/* Stage: 3D orb + waveform */}
                   <div className="flex-1 min-h-0 grid lg:grid-cols-[minmax(0,220px)_1fr] gap-3">
                     <div className="hidden lg:block relative panel-inset overflow-hidden">
-                      <div className="absolute inset-x-0 top-[42%] -translate-y-1/2 aspect-square"><Suspense fallback={null}><VoiceOrb className="w-full h-full" active={isPlaying} interactive={false} /></Suspense></div>
+                      <div className="absolute inset-x-0 top-[42%] -translate-y-1/2 aspect-square"><Suspense fallback={null}><VoiceOrb className="w-full h-full" active={isPlaying} interactive={false} levelRef={audioLevelRef} /></Suspense></div>
                       <div className="absolute inset-x-0 bottom-0 p-3 flex items-center justify-between bg-gradient-to-t from-black/70 to-transparent">
                         <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-white/60">{isPlaying ? 'Now playing' : 'Paused'}</span>
                         <span className={`eq-loader text-[#3fe0c5] ${isPlaying ? '' : 'is-paused'}`}><span /><span /><span /><span /></span>
@@ -1341,7 +1361,23 @@ export default function StudioView({
                         </div>
                       </div>
 
-                      {/* Waveform (click to seek) */}
+                      {/* Live visualizer: follows the real audio at the playhead */}
+                      <div className="relative flex-1 min-h-[90px]">
+                        <LiveSpectrum
+                          track={decoded}
+                          getTime={getPlayheadTime}
+                          playing={isPlaying}
+                          levelRef={audioLevelRef}
+                          className="absolute inset-0 w-full h-full"
+                        />
+                        {!decoded && (
+                          <span className="absolute left-1 top-1 chip !h-6 animate-fadeIn">
+                            <span className="eq-loader text-[#e5a958] !h-3"><span /><span /><span /></span> Analysing audio…
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Real waveform of the track (click to seek) */}
                       <div
                         onClick={handleSeek}
                         onMouseMove={(e) => {
@@ -1352,7 +1388,7 @@ export default function StudioView({
                           setHoverX(e.clientX - rect.left);
                         }}
                         onMouseLeave={() => setHoverTime(null)}
-                        className="relative flex-1 min-h-[64px] max-h-[240px] my-auto w-full flex items-center gap-[2px] px-1 cursor-pointer group"
+                        className="relative h-12 flex-shrink-0 w-full flex items-center gap-[2px] px-1 cursor-pointer group rounded-xl bg-black/25"
                         title="Click to seek"
                       >
                         {duration > 0 && (
@@ -1369,16 +1405,15 @@ export default function StudioView({
                             {formatTime(hoverTime)}
                           </div>
                         )}
-                        {WAVE.map((h, idx) => {
-                          const played = (idx / (WAVE.length - 1)) <= playPct;
-                          const near = isPlaying && Math.abs(idx / (WAVE.length - 1) - playPct) < 0.04;
+                        {(decoded?.peaks || WAVE.map((h) => h / 100)).map((v, idx, arr) => {
+                          const played = (idx / (arr.length - 1)) <= playPct;
                           return (
                             <div key={idx} className="flex-1 h-full flex items-center justify-center">
                               <span
-                                style={{ height: `${h}%`, ...(near ? { animation: 'eq 0.5s ease-in-out infinite alternate', transformOrigin: 'center' } : {}) }}
-                                className={`w-full max-w-[4px] rounded-full transition-colors duration-150 ${played
-                                  ? 'bg-gradient-to-t from-[#e5a958] via-[#f6c98a] to-[#3fe0c5]'
-                                  : 'bg-white/15 group-hover:bg-white/25'}`}
+                                style={{ height: `${Math.max(8, v * 90)}%` }}
+                                className={`w-full max-w-[3px] rounded-full transition-colors duration-150 ${played
+                                  ? 'bg-gradient-to-t from-[#e5a958] to-[#f6c98a]'
+                                  : decoded ? 'bg-white/20 group-hover:bg-white/30' : 'bg-white/[0.07]'}`}
                               />
                             </div>
                           );
