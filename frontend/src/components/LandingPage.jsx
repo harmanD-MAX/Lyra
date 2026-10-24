@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight, AudioWaveform, ChevronDown, Download, FileMusic, Layers, Mic2, Music4,
-  Scissors, Sparkles, Wand2, Waves, Users, SlidersHorizontal, Gauge,
-  Zap, Cpu, ShieldCheck, CheckCircle2, BarChart3, Play, Pause, Info, Activity, Check
+  Scissors, Sparkles, Wand2, Waves, SlidersHorizontal, Gauge, Compass,
+  Zap, Cpu, CheckCircle2, BarChart3, Play, Info, Check
 } from 'lucide-react';
 import LyraLogo from './LyraLogo';
 import Glyph3D from './three/Glyph3D';
+import { HeroIllustration, StepArt, TuneIllustration, BenchmarkChart, EngineScoreBar } from './landing/Illustrations';
 
 const GOLD = '#e5a958';
 const TEAL = '#3fe0c5';
@@ -182,104 +183,52 @@ function PitchDemo() {
 }
 
 /* ---------------------------------------------------------------------------
- * Hero Live Neural Timbre Preview (Waveform & Stems Console)
+ * Section heading used across the page
  * ------------------------------------------------------------------------- */
-function HeroConsolePreview() {
-  const [isPlaying, setIsPlaying] = useState(true);
-  const [activeStem, setActiveStem] = useState('lead');
-
+function SectionHead({ eyebrow, icon: Icon, color = GOLD, title, children, center = false }) {
   return (
-    <div className="relative rounded-3xl border border-white/15 bg-gradient-to-b from-[#14171d]/90 to-[#0b0c0f]/95 p-6 shadow-2xl backdrop-blur-xl overflow-hidden group">
-      {/* Ambient background glow */}
-      <div className="absolute -top-24 -right-24 w-72 h-72 rounded-full bg-[#e5a958]/10 blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-24 -left-24 w-72 h-72 rounded-full bg-[#3fe0c5]/10 blur-3xl pointer-events-none" />
-
-      {/* Top Header bar */}
-      <div className="flex items-center justify-between pb-4 border-b border-white/10">
-        <div className="flex items-center gap-2.5">
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#3fe0c5] opacity-75" />
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#3fe0c5]" />
-          </span>
-          <span className="font-mono text-xs font-semibold uppercase tracking-wider text-white/90">
-            Lyra Neural Console • Live Preview
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="rounded-full bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 text-[10px] font-mono text-emerald-400">
-            Metal Zero-Cache · 219 MB
-          </span>
-        </div>
+    <Reveal className={center ? 'text-center' : ''}>
+      <div className="eyebrow" style={{ color }}>
+        {Icon && <Icon className="w-3.5 h-3.5" />} {eyebrow}
       </div>
+      <h2 className={`mt-4 text-3xl sm:text-5xl font-bold tracking-tight leading-[1.06] max-w-3xl ${center ? 'mx-auto' : ''}`} style={{ fontFamily: 'var(--font-display)' }}>
+        {title}
+      </h2>
+      {children && (
+        <p className={`mt-4 text-base sm:text-lg text-white/60 max-w-2xl leading-relaxed ${center ? 'mx-auto' : ''}`}>{children}</p>
+      )}
+    </Reveal>
+  );
+}
 
-      {/* Interactive Waveform Visualizer */}
-      <div className="my-5 p-4 rounded-2xl bg-black/40 border border-white/5 relative">
-        <div className="flex items-center justify-between text-xs font-mono text-white/50 mb-3">
-          <span>TARGET TIMBRE: ARIJIT SINGH</span>
-          <span className="text-[#3fe0c5]">PITCH LOCKED (C# MINOR)</span>
-        </div>
+/* ---------------------------------------------------------------------------
+ * Feature ribbon (replaces the old text marquee)
+ * ------------------------------------------------------------------------- */
+const RIBBON = [
+  [Scissors, 'RoFormer separation', GOLD],
+  [Layers, 'Lead / backing split', TEAL],
+  [Waves, 'De-reverb', GOLD],
+  [Music4, 'Note-level tuning', TEAL],
+  [AudioWaveform, 'Guide melody & timing', GOLD],
+  [Mic2, 'Seed-VC & RVC v2', TEAL],
+  [Wand2, 'Harmony in key', GOLD],
+  [SlidersHorizontal, 'Acoustic rack', TEAL],
+  [FileMusic, 'MIDI export', GOLD],
+  [Download, '24-bit stems', TEAL],
+];
 
-        {/* Dynamic Waveform Bars */}
-        <div className="h-20 flex items-center justify-between gap-1 px-1">
-          {Array.from({ length: 36 }).map((_, i) => {
-            const height = isPlaying
-              ? Math.max(12, Math.sin(i * 0.45) * 38 + Math.cos(i * 0.8) * 22 + 40)
-              : 8;
-            const isGold = i % 3 === 0;
-            return (
-              <div
-                key={i}
-                className="w-1.5 rounded-full transition-all duration-300"
-                style={{
-                  height: `${height}%`,
-                  backgroundColor: isGold ? GOLD : TEAL,
-                  opacity: isPlaying ? (0.4 + (i % 5) * 0.12) : 0.2,
-                  boxShadow: isPlaying && isGold ? `0 0 8px ${GOLD}66` : 'none',
-                }}
-              />
-            );
-          })}
-        </div>
-
-        {/* Stem Switcher Badges */}
-        <div className="mt-4 pt-3 border-t border-white/5 flex flex-wrap gap-2">
-          {[
-            { id: 'lead', label: 'Lead Vocal Stem', badge: 'Seed-VC 44.1k' },
-            { id: 'inst', label: 'Instrumental', badge: 'RoFormer v2' },
-            { id: 'harm', label: 'Diatonic Harmonies', badge: 'In-Key 3rd' },
-          ].map((stem) => (
-            <button
-              key={stem.id}
-              type="button"
-              onClick={() => setActiveStem(stem.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
-                activeStem === stem.id
-                  ? 'bg-white/15 text-white border border-white/20 shadow-sm'
-                  : 'bg-white/5 text-white/50 hover:text-white/80 border border-white/5'
-              }`}
-            >
-              <span>{stem.label}</span>
-              <span className="text-[10px] font-mono text-[#e5a958]">{stem.badge}</span>
-            </button>
+function FeatureRibbon() {
+  const items = [...RIBBON, ...RIBBON];
+  return (
+    <div className="relative py-6 border-y border-white/[0.06] bg-gradient-to-b from-white/[0.015] to-transparent">
+      <div className="ribbon">
+        <div className="ribbon-track">
+          {items.map(([Icon, label, c], i) => (
+            <span key={i} className="ribbon-pill" aria-hidden={i >= RIBBON.length}>
+              <i style={{ color: c }}><Icon /></i>
+              {label}
+            </span>
           ))}
-        </div>
-      </div>
-
-      {/* Play / Status Controls */}
-      <div className="flex items-center justify-between pt-1 text-xs">
-        <button
-          type="button"
-          onClick={() => setIsPlaying(!isPlaying)}
-          className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white font-medium transition cursor-pointer"
-        >
-          {isPlaying ? <Pause className="w-3.5 h-3.5 text-[#3fe0c5]" /> : <Play className="w-3.5 h-3.5 text-[#e5a958]" />}
-          <span>{isPlaying ? 'Pause Spectrum' : 'Simulate Playback'}</span>
-        </button>
-
-        <div className="flex items-center gap-3 font-mono text-white/50 text-[11px]">
-          <span>SDR: <b className="text-white">+14.8 dB</b></span>
-          <span>•</span>
-          <span>LATENCY: <b className="text-emerald-400">1.8s MPS</b></span>
         </div>
       </div>
     </div>
@@ -287,185 +236,124 @@ function HeroConsolePreview() {
 }
 
 /* ---------------------------------------------------------------------------
- * Real Benchmark Data & Comparison Section
+ * Benchmarks
  * ------------------------------------------------------------------------- */
-const BENCHMARK_CATEGORIES = [
+const BENCHMARKS = [
   {
-    id: 'memory',
-    label: 'RAM / VRAM Footprint',
-    icon: Cpu,
-    lyraValue: '219 MB',
-    industryValue: '5,400 MB',
-    metric: 'Active Memory Consumption',
-    winner: 'Lyra is 24× more lightweight',
-    description: 'Lyra uses zero-cache Metal cleanup (mx.set_cache_limit(0)) and dynamic PyTorch MPS watermark recycling to prevent memory leaks, running seamlessly on base M-series Macs without paging.',
-    lyraPct: 8,
-    industryPct: 95,
-    unit: 'MB',
+    id: 'memory', label: 'Memory footprint', icon: Cpu, unit: 'MB', lyra: 219, base: 5400, max: 6000,
+    ticks: [0, 1500, 3000, 4500, 6000], better: 'lower', axis: 'Active RAM / VRAM while rendering (MB)',
+    headline: '24× lighter',
+    body: 'Zero-cache Metal cleanup and MPS watermark recycling keep memory flat, so Lyra runs on a base M-series Mac without swapping.',
   },
   {
-    id: 'sdr',
-    label: 'Vocal Separation SDR',
-    icon: Scissors,
-    lyraValue: '+14.8 dB',
-    industryValue: '+10.2 dB',
-    metric: 'Signal-to-Distortion Ratio (SDR)',
-    winner: 'Lyra RoFormer-v2 is +4.6 dB cleaner',
-    description: 'Lyra deploys Mel-Band RoFormer-v2 for vocal extraction, completely eliminating instrumental bleed and drum phase artifacts before the vocal enters the timbre conversion pipeline.',
-    lyraPct: 94,
-    industryPct: 65,
-    unit: 'dB SDR',
+    id: 'sdr', label: 'Vocal separation', icon: Scissors, unit: 'dB', lyra: 14.8, base: 10.2, max: 16,
+    ticks: [0, 4, 8, 12, 16], better: 'higher', axis: 'Signal-to-distortion ratio of the extracted vocal (dB)',
+    headline: '+4.6 dB cleaner',
+    body: 'Mel-Band RoFormer pulls the vocal with far less instrument bleed before it ever reaches the voice model.',
   },
   {
-    id: 'lyrics',
-    label: 'Lyrics Intelligibility',
-    icon: AudioWaveform,
-    lyraValue: '98.4%',
-    industryValue: '84.1%',
-    metric: 'Phonetic Accuracy on Fast Lyrics',
-    winner: 'Seed-VC DiT 44.1kHz retains crystal consonants',
-    description: 'Seed-VC with Whisper phoneme attention preserves subtle Urdu/Hindi/English consonants, fricatives, and breathless whispers that traditional 24kHz RVC models slur or blur.',
-    lyraPct: 98,
-    industryPct: 84,
-    unit: '%',
+    id: 'lyrics', label: 'Lyric clarity', icon: AudioWaveform, unit: '%', lyra: 98.4, base: 84.1, max: 100,
+    ticks: [0, 25, 50, 75, 100], better: 'higher', axis: 'Phonetic accuracy on fast Hindi / Urdu / English lyrics (%)',
+    headline: '+14 points',
+    body: 'Seed-VC at 44.1 kHz with Whisper features keeps consonants and breaths that 24 kHz conversions slur.',
   },
   {
-    id: 'latency',
-    label: 'Apple Silicon Local Latency',
-    icon: Zap,
-    lyraValue: '1.8s',
-    industryValue: '28.5s',
-    metric: 'Render Time (per 10s Audio)',
-    winner: '15× faster with 100% on-device privacy',
-    description: 'No cloud queues, upload latency, or data privacy risks. Lyra renders locally utilizing Apple Silicon unified memory with Metal Performance Shaders.',
-    lyraPct: 12,
-    industryPct: 90,
-    unit: 'seconds',
+    id: 'latency', label: 'Render time', icon: Zap, unit: 's', lyra: 1.8, base: 28.5, max: 30,
+    ticks: [0, 10, 20, 30], better: 'lower', axis: 'Seconds to render 10 s of audio, on-device',
+    headline: '15× faster',
+    body: 'No upload, no cloud queue. Everything renders locally on Apple Silicon unified memory.',
   },
 ];
 
 function BenchmarkSection() {
-  const [activeTab, setActiveTab] = useState('memory');
-  const activeBenchmark = BENCHMARK_CATEGORIES.find((b) => b.id === activeTab) || BENCHMARK_CATEGORIES[0];
+  const [activeId, setActiveId] = useState('memory');
+  const m = BENCHMARKS.find((b) => b.id === activeId) || BENCHMARKS[0];
 
   return (
-    <section id="benchmarks" className="relative py-24 sm:py-32 px-4 sm:px-6 border-t border-white/5 bg-[#0a0c10]">
+    <section id="benchmarks" className="relative py-24 sm:py-32 px-4 sm:px-6">
       <div className="max-w-6xl mx-auto">
-        <Reveal>
-          <div className="flex items-center gap-2 text-xs uppercase font-mono tracking-[0.25em]" style={{ color: TEAL }}>
-            <BarChart3 className="w-4 h-4" /> Real Application Benchmarks
+        <SectionHead eyebrow="Benchmarks" icon={BarChart3} color={TEAL} title={<>Measured, <span className="font-accent text-[#3fe0c5]">not guessed.</span></>}>
+          Lyra's pipeline against a typical PyTorch RVC WebUI setup, on the same Apple Silicon machine.
+        </SectionHead>
+
+        <Reveal delay={120} className="mt-12">
+          <div className="panel rim-glow p-4 sm:p-6 grid lg:grid-cols-[260px_1fr] gap-6">
+            {/* metric picker */}
+            <div className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-visible -mx-1 px-1 pb-1 lg:pb-0">
+              {BENCHMARKS.map((b) => {
+                const Icon = b.icon;
+                const on = b.id === activeId;
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => setActiveId(b.id)}
+                    className="option-card shrink-0 lg:w-full"
+                    data-active={on}
+                    style={{ '--accent': TEAL }}
+                  >
+                    <span className={`w-9 h-9 rounded-xl grid place-items-center border ${on ? 'border-[#3fe0c5]/50 bg-[#3fe0c5]/10' : 'border-white/10 bg-white/[0.03]'}`}>
+                      <Icon className={`w-4 h-4 ${on ? 'text-[#3fe0c5]' : 'text-white/50'}`} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold">{b.label}</span>
+                      <span className="block text-[11px] font-mono text-white/45">{b.headline}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* chart */}
+            <div className="panel-inset p-5 sm:p-6 min-w-0">
+              <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
+                <div>
+                  <h3 className="text-xl sm:text-2xl font-bold text-white">{m.label}</h3>
+                  <p className="mt-1 text-sm text-white/55 max-w-lg leading-relaxed">{m.body}</p>
+                </div>
+                <span className="chip chip-teal"><CheckCircle2 className="w-3 h-3" /> {m.headline}</span>
+              </div>
+              <BenchmarkChart key={m.id} metric={m} />
+            </div>
           </div>
-          <h2 className="mt-3 text-3xl sm:text-5xl font-bold tracking-tight max-w-3xl" style={{ fontFamily: "var(--font-display)" }}>
-            Engineered for Apple Silicon. Measured against industry standards.
-          </h2>
-          <p className="mt-4 text-base sm:text-lg text-white/60 max-w-2xl leading-relaxed">
-            Real performance benchmarks comparing Lyra's Zero-Cache Metal Pipeline against traditional PyTorch RVC WebUI and cloud voice services.
-          </p>
         </Reveal>
 
-        {/* Metric Selector Tabs */}
-        <div className="mt-10 grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {BENCHMARK_CATEGORIES.map((cat) => {
-            const Icon = cat.icon;
-            const isSelected = activeTab === cat.id;
+        {/* small multiples: every metric at a glance */}
+        <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {BENCHMARKS.map((b, i) => {
+            const lyraPct = (b.lyra / b.max) * 100;
+            const basePct = (b.base / b.max) * 100;
             return (
-              <button
-                key={cat.id}
-                type="button"
-                onClick={() => setActiveTab(cat.id)}
-                className={`p-4 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                  isSelected
-                    ? 'bg-[#14171d] border-[#e5a958]/60 shadow-lg ring-1 ring-[#e5a958]/30'
-                    : 'bg-white/[0.02] border-white/10 hover:border-white/20 hover:bg-white/[0.04]'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <Icon className={`w-5 h-5 ${isSelected ? 'text-[#e5a958]' : 'text-white/40'}`} />
-                  <span className={`text-xs font-mono font-semibold ${isSelected ? 'text-[#3fe0c5]' : 'text-white/40'}`}>
-                    {cat.lyraValue}
-                  </span>
-                </div>
-                <div className="mt-4">
-                  <div className="text-sm font-semibold text-white">{cat.label}</div>
-                  <div className="text-[11px] text-white/45 mt-0.5 truncate">{cat.metric}</div>
-                </div>
-              </button>
+              <Reveal key={b.id} delay={i * 80}>
+                <button type="button" onClick={() => setActiveId(b.id)} className="w-full text-left panel !rounded-2xl p-4 hover:border-white/20 transition cursor-pointer">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-xs text-white/55">{b.label}</span>
+                    <span className="text-[10px] font-mono text-white/35">{b.better === 'lower' ? '↓ better' : '↑ better'}</span>
+                  </div>
+                  <div className="mt-2 text-2xl font-bold font-mono text-white">{b.lyra.toLocaleString()}<span className="text-sm text-white/45 ml-1">{b.unit}</span></div>
+                  <div className="mt-3 space-y-1.5">
+                    <div className="h-1.5 rounded-full bg-white/[0.06]"><div className="h-full rounded-full" style={{ width: `${Math.max(2, lyraPct)}%`, background: GOLD }} /></div>
+                    <div className="h-1.5 rounded-full bg-white/[0.06]"><div className="h-full rounded-full bg-[#6b7280]" style={{ width: `${Math.max(2, basePct)}%` }} /></div>
+                  </div>
+                  <div className="mt-2 flex justify-between text-[10px] font-mono text-white/40">
+                    <span>Lyra</span><span>typical {b.base.toLocaleString()}</span>
+                  </div>
+                </button>
+              </Reveal>
             );
           })}
         </div>
 
-        {/* Active Benchmark Detailed Card */}
-        <Reveal delay={150} className="mt-8">
-          <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-[#12151b] via-[#0d0f13] to-[#07080a] p-6 sm:p-8 shadow-2xl relative overflow-hidden">
-            <div className="grid lg:grid-cols-2 gap-8 items-center">
-              <div>
-                <div className="inline-flex items-center gap-2 rounded-full bg-[#3fe0c5]/10 border border-[#3fe0c5]/25 px-3 py-1 text-xs font-mono text-[#3fe0c5]">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  {activeBenchmark.winner}
-                </div>
-                <h3 className="mt-4 text-2xl sm:text-3xl font-bold text-white" style={{ fontFamily: "var(--font-display)" }}>
-                  {activeBenchmark.label}
-                </h3>
-                <p className="mt-3 text-sm sm:text-base text-white/65 leading-relaxed">
-                  {activeBenchmark.description}
-                </p>
-
-                <div className="mt-6 pt-6 border-t border-white/10 grid grid-cols-2 gap-4">
-                  <div>
-                    <span className="text-xs font-mono text-white/50 block">LYRA ZERO-CACHE</span>
-                    <span className="text-2xl sm:text-3xl font-bold text-[#e5a958] font-mono mt-1 block">
-                      {activeBenchmark.lyraValue}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-xs font-mono text-white/50 block">TRADITIONAL WEBUI</span>
-                    <span className="text-2xl sm:text-3xl font-bold text-white/40 font-mono mt-1 block">
-                      {activeBenchmark.industryValue}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Progress Bar Visualizer */}
-              <div className="space-y-6 bg-black/40 rounded-2xl border border-white/5 p-6">
-                <div>
-                  <div className="flex justify-between text-xs font-mono mb-2">
-                    <span className="text-[#e5a958] font-semibold flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-[#e5a958]" />
-                      Lyra Pipeline (Metal MPS)
-                    </span>
-                    <span className="text-white font-bold">{activeBenchmark.lyraValue}</span>
-                  </div>
-                  <div className="h-3 rounded-full bg-white/10 overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-[#e5a958] to-[#3fe0c5] rounded-full transition-all duration-700 shadow-[0_0_12px_rgba(229,169,88,0.5)]"
-                      style={{ width: `${activeBenchmark.lyraPct}%` }}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex justify-between text-xs font-mono mb-2">
-                    <span className="text-white/50 flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-white/30" />
-                      Traditional PyTorch RVC WebUI / Cloud
-                    </span>
-                    <span className="text-white/50">{activeBenchmark.industryValue}</span>
-                  </div>
-                  <div className="h-3 rounded-full bg-white/10 overflow-hidden">
-                    <div
-                      className="h-full bg-white/30 rounded-full transition-all duration-700"
-                      style={{ width: `${activeBenchmark.industryPct}%` }}
-                    />
-                  </div>
-                </div>
-
-                <div className="pt-2 text-[11px] text-white/40 font-mono flex items-center justify-between">
-                  <span>Hardware: Apple Silicon M-Series</span>
-                  <span>100% Private & Local</span>
-                </div>
-              </div>
+        <Reveal delay={150} className="mt-6">
+          <div className="panel !rounded-2xl p-5 sm:p-6 grid md:grid-cols-[1fr_1.4fr] gap-6 items-center">
+            <div>
+              <div className="eyebrow text-white/50"><Gauge className="w-3.5 h-3.5" /> Choosing an engine</div>
+              <h3 className="mt-2 text-lg sm:text-xl font-semibold text-white">How a voice's best engine is scored</h3>
+              <p className="mt-2 text-sm text-white/55 leading-relaxed">
+                <code className="font-mono text-[12px] text-white/75">backend/tools/benchmark.py</code> renders your clips with both engines and saves the winner for that voice.
+              </p>
             </div>
+            <EngineScoreBar />
           </div>
         </Reveal>
       </div>
@@ -474,193 +362,128 @@ function BenchmarkSection() {
 }
 
 /* ---------------------------------------------------------------------------
- * Engine Guide Section: RVC v2 vs Seed-VC & How to Use
+ * How to use — mirrors the studio as it is today
  * ------------------------------------------------------------------------- */
-function EngineGuideSection() {
-  const [activeEngine, setActiveEngine] = useState('both');
+const GUIDE = [
+  {
+    art: 'mode', title: 'Choose a mode',
+    body: 'Vocal Take — you sang it and want it fixed. AI Song Cover — re-sing an existing song in another voice.',
+    where: 'Studio → mode switch',
+  },
+  {
+    art: 'source', title: 'Add your audio',
+    body: 'Record from the mic or upload a file. For covers you can also paste a Spotify or YouTube link.',
+    where: 'Studio → source tabs',
+  },
+  {
+    art: 'voice', title: 'Pick voice & engine',
+    body: 'Arijit Singh, Sonu Nigam or KK — or "Keep my voice" in Vocal Take. Then RVC v2 (tight pitch) or Seed-VC (clear lyrics).',
+    where: 'Studio → singer & engine',
+  },
+  {
+    art: 'tune', title: 'Fix pitch',
+    body: 'Lyra auto-tunes your take the moment it lands. Compare Fixed Notes against Raw before you render.',
+    where: 'Fix Pitch switch · preview',
+  },
+  {
+    art: 'mix', title: 'Listen & mix',
+    body: 'Switch between Master 3D, Clean Natural, the solo vocal, instrumental and your original. Open the Acoustic Rack to rebalance.',
+    where: 'Player → stems · rack',
+  },
+  {
+    art: 'export', title: 'Export & keep',
+    body: 'Download WAV or MP3, grab stems and MIDI, re-render a section, or save the master to the cloud. Find it later in My Songs.',
+    where: 'Player → export bar',
+  },
+];
 
+function GuideSection({ onLaunch }) {
   return (
-    <section id="engine-guide" className="relative py-24 sm:py-32 px-4 sm:px-6 bg-[#07080a] border-t border-white/5">
-      <div className="max-w-6xl mx-auto">
-        <Reveal>
-          <div className="flex items-center gap-2 text-xs uppercase font-mono tracking-[0.25em]" style={{ color: GOLD }}>
-            <Sparkles className="w-4 h-4" /> New User Engine Guide
-          </div>
-          <h2 className="mt-3 text-3xl sm:text-5xl font-bold tracking-tight max-w-3xl" style={{ fontFamily: "var(--font-display)" }}>
-            RVC v2 vs Seed-VC: How the magic works.
-          </h2>
-          <p className="mt-4 text-base sm:text-lg text-white/60 max-w-2xl leading-relaxed">
-            Never used an AI vocal studio before? Here is a breakdown of our two world-class engines, their distinct strengths, and how to create your first song in minutes.
-          </p>
-        </Reveal>
+    <section id="guide" className="relative py-24 sm:py-32 px-4 sm:px-6 overflow-hidden">
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(229,169,88,0.07),transparent_60%)] pointer-events-none" />
+      <div className="relative max-w-6xl mx-auto">
+        <SectionHead eyebrow="How to use Lyra" icon={Compass} title={<>From first take to <span className="font-accent text-[#e5a958]">finished master.</span></>}>
+          Six steps, all on one screen in the studio.
+        </SectionHead>
 
-        {/* Engine Comparison Cards */}
-        <div className="mt-12 grid lg:grid-cols-2 gap-6">
-          {/* Engine 1: Seed-VC */}
-          <Reveal delay={100}>
-            <div className="h-full rounded-3xl border border-[#3fe0c5]/30 bg-gradient-to-b from-[#3fe0c5]/[0.05] to-transparent p-7 relative flex flex-col justify-between">
-              <div className="absolute top-6 right-6">
-                <span className="rounded-full bg-[#3fe0c5]/15 border border-[#3fe0c5]/30 px-3 py-1 text-xs font-mono text-[#3fe0c5]">
-                  44.1 kHz Hi-Fi DiT
-                </span>
-              </div>
-              <div>
-                <h3 className="text-2xl font-bold text-white flex items-center gap-2">
-                  <span>Seed-VC Singing Engine</span>
-                </h3>
-                <p className="text-xs text-[#3fe0c5] font-mono mt-1">Zero-Shot Diffusion Transformer</p>
-                <p className="mt-4 text-sm text-white/70 leading-relaxed">
-                  A state-of-the-art diffusion architecture coupled with OpenAI Whisper phoneme embeddings and a BigVGAN neural vocoder. Seed-VC clones any voice from just <b>15 to 30 seconds</b> of clean audio without hours of model training.
-                </p>
-
-                <div className="mt-6 space-y-2.5 text-xs text-white/80">
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#3fe0c5] shrink-0" />
-                    <span><b>Crystal Lyric Intelligibility:</b> Flawless pronunciation on rapid Hindi, Urdu, and English.</span>
+        <div className="mt-14 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {GUIDE.map((g, i) => {
+            return (
+              <Reveal key={g.title} delay={i * 80}>
+                <div className="group panel !rounded-3xl p-5 h-full flex flex-col hover:border-white/20 transition-colors">
+                  <div className="transition-transform duration-500 group-hover:-translate-y-1"><StepArt kind={g.art} /></div>
+                  <div className="mt-5 flex items-center gap-3">
+                    <span className="font-mono text-xs text-[#e5a958]">0{i + 1}</span>
+                    <h3 className="text-lg font-semibold text-white">{g.title}</h3>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#3fe0c5] shrink-0" />
-                    <span><b>Instant 20-Second Voice Clone:</b> No waiting for training checkpoints.</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#3fe0c5] shrink-0" />
-                    <span><b>Best For:</b> Emotive ballads, subtle whispers, and natural breath phrasing.</span>
-                  </div>
+                  <p className="mt-2 text-sm text-white/60 leading-relaxed flex-1">{g.body}</p>
+                  <div className="mt-4 pt-3 border-t border-white/[0.06] text-[11px] font-mono text-white/40">{g.where}</div>
                 </div>
-              </div>
-
-              <div className="mt-6 pt-4 border-t border-white/10 flex items-center justify-between text-xs font-mono text-white/50">
-                <span>Sample Rate: 44.1 kHz</span>
-                <span>Requires: 1 clean voice clip</span>
-              </div>
-            </div>
-          </Reveal>
-
-          {/* Engine 2: RVC v2 */}
-          <Reveal delay={200}>
-            <div className="h-full rounded-3xl border border-[#e5a958]/30 bg-gradient-to-b from-[#e5a958]/[0.05] to-transparent p-7 relative flex flex-col justify-between">
-              <div className="absolute top-6 right-6">
-                <span className="rounded-full bg-[#e5a958]/15 border border-[#e5a958]/30 px-3 py-1 text-xs font-mono text-[#e5a958]">
-                  48 kHz Pitch-Locked
-                </span>
-              </div>
-              <div>
-                <h3 className="text-2xl font-bold text-white flex items-center gap-2">
-                  <span>RVC v2 48kHz Engine</span>
-                </h3>
-                <p className="text-xs text-[#e5a958] font-mono mt-1">Retrieval-based Voice Conversion</p>
-                <p className="mt-4 text-sm text-white/70 leading-relaxed">
-                  The gold standard in tight pitch adherence and belting vocal power. Uses HuBERT/ContentVec feature extraction and RMVPE pitch estimation to snap notes onto exact musical frequencies with zero drift.
-                </p>
-
-                <div className="mt-6 space-y-2.5 text-xs text-white/80">
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#e5a958] shrink-0" />
-                    <span><b>Rock-Solid Pitch Lock:</b> Unmatched vocal power for high notes, murkis, and harkats.</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#e5a958] shrink-0" />
-                    <span><b>Legend Voice Models:</b> Powering our Arijit Singh, Sonu Nigam, and KK models.</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#e5a958] shrink-0" />
-                    <span><b>Best For:</b> High-energy singing covers, rock belts, and classical runs.</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-6 pt-4 border-t border-white/10 flex items-center justify-between text-xs font-mono text-white/50">
-                <span>Sample Rate: 48.0 kHz</span>
-                <span>Requires: Model checkpoint (.pth)</span>
-              </div>
-            </div>
-          </Reveal>
+              </Reveal>
+            );
+          })}
         </div>
 
-        {/* 3-Step Workflow Infographic */}
-        <Reveal delay={300} className="mt-16">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.02] p-6 sm:p-8">
-            <h3 className="text-xl sm:text-2xl font-bold text-white mb-8" style={{ fontFamily: "var(--font-display)" }}>
-              3 Simple Steps to Your Master Track
-            </h3>
+        <Reveal delay={200} className="mt-10 flex flex-wrap justify-center gap-3">
+          <button type="button" onClick={() => onLaunch(undefined, { mode: 'my_voice' })} className="btn btn-outline-gold btn-lg">
+            <Mic2 /> Start a vocal take
+          </button>
+          <button type="button" onClick={() => onLaunch(undefined, { mode: 'convert' })} className="btn btn-outline-teal btn-lg">
+            <Sparkles /> Make an AI cover
+          </button>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
 
-            <div className="grid md:grid-cols-3 gap-6 relative">
-              {[
-                {
-                  step: '01',
-                  title: 'Select Singer & Model Engine',
-                  desc: 'Pick an AI legend (Arijit Singh, Sonu Nigam, KK) and select your preferred engine: RVC v2 (48 kHz) or Seed-VC (44.1 kHz).',
-                  tag: 'Voice & Engine Selection',
-                },
-                {
-                  step: '02',
-                  title: 'Select Creation Mode',
-                  desc: 'Choose "I Sang This Vocal" to auto-tune your take, or "Neural AI Cover" to resing any file, YouTube, or Spotify track.',
-                  tag: 'Distinct Creation Paths',
-                },
-                {
-                  step: '03',
-                  title: 'Master & Export',
-                  desc: 'Lyra extracts stems with RoFormer v2, applies melody alignment, masters acoustic depth, and exports 24-bit stems and MIDI.',
-                  tag: 'DAW-Ready Stems',
-                },
-              ].map((item, idx) => (
-                <div key={item.step} className="p-5 rounded-2xl bg-black/40 border border-white/5 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center justify-between mb-4">
-                      <span className="font-mono text-2xl font-bold text-[#e5a958]">{item.step}</span>
-                      <span className="text-[10px] font-mono text-white/40 uppercase tracking-wider">{item.tag}</span>
-                    </div>
-                    <h4 className="text-lg font-semibold text-white">{item.title}</h4>
-                    <p className="mt-2 text-xs sm:text-sm text-white/60 leading-relaxed">{item.desc}</p>
-                  </div>
+/* ---------------------------------------------------------------------------
+ * Engines
+ * ------------------------------------------------------------------------- */
+const ENGINES = [
+  {
+    name: 'Seed-VC', tag: 'Diffusion · 44.1 kHz', color: TEAL,
+    body: 'A DiT diffusion model with Whisper features and a BigVGAN vocoder. Sings as a voice from a 10–30 s sample.',
+    points: ['Clearest lyrics and breaths', 'Closest likeness on soft, emotive songs', 'Optional install (a few GB)'],
+  },
+  {
+    name: 'RVC v2', tag: 'Retrieval · 40 / 48 kHz', color: GOLD,
+    body: 'Retrieval-based conversion with RMVPE pitch tracking. Small, fast, and the tightest on pitch.',
+    points: ['Rock-solid pitch on belts and runs', 'Cleanest audio, fastest renders', 'Powers the Arijit, Sonu and KK models'],
+  },
+];
+
+function EnginesSection() {
+  return (
+    <section id="engines" className="relative py-24 sm:py-32 px-4 sm:px-6 border-t border-white/[0.05]">
+      <div className="max-w-6xl mx-auto">
+        <SectionHead eyebrow="Two engines" icon={Cpu} color={TEAL} title="Pick the engine for the song.">
+          Every singer works with both. Switch per render in the studio.
+        </SectionHead>
+        <div className="mt-12 grid md:grid-cols-2 gap-5">
+          {ENGINES.map((e, i) => (
+            <Reveal key={e.name} delay={i * 120}>
+              <div className="panel !rounded-3xl p-7 h-full relative overflow-hidden">
+                <div className="absolute -top-20 -right-20 w-56 h-56 rounded-full blur-3xl opacity-25" style={{ background: e.color }} />
+                <div className="relative flex items-center justify-between">
+                  <h3 className="text-2xl font-bold text-white">{e.name}</h3>
+                  <span className={`chip ${e.color === TEAL ? 'chip-teal' : 'chip-gold'}`}>{e.tag}</span>
                 </div>
-              ))}
-            </div>
-          </div>
-        </Reveal>
-
-        {/* Advanced Settings Decoded */}
-        <Reveal delay={400} className="mt-12">
-          <div className="rounded-3xl border border-white/10 bg-[#0d0f14] p-6 sm:p-8">
-            <div className="flex items-center gap-2 text-xs font-mono uppercase text-[#3fe0c5] mb-2">
-              <SlidersHorizontal className="w-4 h-4" /> Pro Audio Knowledge
-            </div>
-            <h3 className="text-xl sm:text-2xl font-bold text-white mb-6" style={{ fontFamily: "var(--font-display)" }}>
-              Advanced Settings Explained
-            </h3>
-
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-              <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5">
-                <span className="font-semibold text-white block text-sm">Pitch Shift (Semitones)</span>
-                <p className="text-white/60 mt-1 leading-relaxed">
-                  Transposes vocal key. Set <b>-12</b> for female-to-male conversion, or <b>+12</b> for male-to-female conversion. Leave at <b>0</b> for same gender.
-                </p>
+                <p className="relative mt-4 text-sm text-white/65 leading-relaxed">{e.body}</p>
+                <ul className="relative mt-6 space-y-2.5">
+                  {e.points.map((p) => (
+                    <li key={p} className="flex items-center gap-2.5 text-sm text-white/80">
+                      <span className="w-5 h-5 rounded-full grid place-items-center" style={{ background: `${e.color}22` }}>
+                        <Check className="w-3 h-3" style={{ color: e.color }} />
+                      </span>
+                      {p}
+                    </li>
+                  ))}
+                </ul>
               </div>
-
-              <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5">
-                <span className="font-semibold text-white block text-sm">Index Feature Rate</span>
-                <p className="text-white/60 mt-1 leading-relaxed">
-                  Controls timbre retrieval balance (default <b>0.75</b>). Higher = closer accent and tone match; Lower = smoother audio with fewer artifacts.
-                </p>
-              </div>
-
-              <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5">
-                <span className="font-semibold text-white block text-sm">Voiceless Consonant Protect</span>
-                <p className="text-white/60 mt-1 leading-relaxed">
-                  Safeguards sharp "s", "t", and breath sounds from robotic warping (default <b>0.33</b>). Prevents voice tearing on acoustic tracks.
-                </p>
-              </div>
-
-              <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5">
-                <span className="font-semibold text-white block text-sm">RMVPE Pitch Extraction</span>
-                <p className="text-white/60 mt-1 leading-relaxed">
-                  Lyra's neural pitch extractor. Resistant to background noise and vocal rasp, extracting clean fundamental frequencies (F0) with zero delay.
-                </p>
-              </div>
-            </div>
-          </div>
-        </Reveal>
+            </Reveal>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -684,11 +507,12 @@ const PIPELINE = [
 ];
 
 const FAQ = [
-  ['I can\'t sing. Will this actually help?', 'Yes — that\'s what My Voice mode is for. Sing your take (optionally over the original song). Lyra aligns your timing to the original, moves your notes onto the melody, steadies wobble and can add gentle vibrato. Then you choose: keep your own voice, or have it sung by a voice model.'],
-  ['Can I fix pitch and auto-tune my vocal recording?', 'Yes! When you record your vocal take or upload an a cappella audio clip, toggle the "Fix Pitch & Auto-Tune" checkbox. When active, it locks your melody to the detected key and scale; uncheck it to preserve raw microtonal nuances.'],
-  ['What do composers get out of it?', 'Every render exports 24-bit dry stems (converted lead, harmony, original backing vocals, instrumental), a MIDI file of the final melody, and the detected key and tempo. You can re-render a single section with new settings without redoing the song.'],
-  ['Which AI models does Lyra use?', 'Two singing engines: Seed-VC singing (a 2024 diffusion model with Whisper and BigVGAN, 44.1 kHz) sings as a voice from a short sample, and RVC v2 (trained at up to 48 kHz) keeps the tightest pitch and cleanest audio.'],
-  ['Which hardware do I need?', 'Apple Silicon Macs (M1/M2/M3/M4) run natively on Metal with zero memory leaks (~219 MB). NVIDIA GPUs run with CUDA. Everything also runs on CPU, just slower.'],
+  ['I can\'t sing. Will this actually help?', 'Yes — that\'s what Vocal Take mode is for. Record or upload your take; Lyra moves your notes onto the scale, steadies wobble and lets you compare the fixed version against your raw take before rendering. Then keep your own voice, in tune, or hand it to a singer model.'],
+  ['How do I turn pitch correction off?', 'Use the Fix Pitch switch next to the engine picker. On, your melody is locked to the detected key; off, your microtonal phrasing is kept as sung. In Vocal Take you can also flip between Fixed Notes and Raw while previewing.'],
+  ['Which engine should I pick?', 'RVC v2 for the tightest pitch, belting and fast renders. Seed-VC for the clearest lyrics and the closest likeness on soft, emotional songs. Both work with every singer, so try the same song with each.'],
+  ['What do I get after a render?', 'A Master 3D mix and a Clean Natural mix, the solo converted vocal, the instrumental and your original vocal — all switchable in the player without losing your place. Stems · MIDI · Re-render gives you 24-bit stems, a MIDI file, key and BPM, and section re-renders.'],
+  ['Where are my songs kept?', 'Every render appears in My Songs in the studio sidebar. Save to Cloud keeps a copy of the Master 3D mix; Free up space removes temporary files but keeps your masters, stems and MIDI.'],
+  ['Which hardware do I need?', 'Apple Silicon Macs run natively on Metal; NVIDIA GPUs run with CUDA. Everything also runs on CPU, just slower. Lite mode kicks in automatically on smaller machines.'],
   ['Is it OK to use famous voices?', 'Lyra is a personal, for-fun project. Voice likeness is protected in many places, so keep celebrity-voice renders private and don\'t publish or monetise them. Your own voice is always yours to use.'],
 ];
 
@@ -703,72 +527,66 @@ export default function LandingPage({ onLaunchStudio }) {
   return (
     <main className="relative bg-[#07080a] text-white overflow-x-hidden">
       {/* ================================================================ HERO */}
-      <section id="hero" className="relative min-h-[92svh] flex items-center overflow-hidden pt-24 pb-16 px-4 sm:px-6">
+      <section id="hero" className="relative min-h-[100svh] flex items-center overflow-hidden pt-28 pb-16 px-4 sm:px-6">
         <div className="hero-grid absolute inset-0" />
         <div className="aurora pointer-events-none absolute -top-40 right-[-10%] w-[800px] h-[550px]" />
-        
-        <div className="relative z-10 max-w-7xl mx-auto w-full grid lg:grid-cols-[1.1fr_1fr] gap-10 items-center">
-          {/* Text column */}
+
+        <div className="relative z-10 max-w-7xl mx-auto w-full grid lg:grid-cols-[1fr_1.05fr] gap-12 lg:gap-6 items-center">
           <div className="text-center lg:text-left">
             <Reveal>
-              <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-4 py-1.5 text-xs tracking-[0.2em] uppercase text-white/75">
-                <Sparkles className="w-3.5 h-3.5" style={{ color: GOLD }} /> Neural vocal studio
+              <span className="chip !h-7 !px-3 !text-[11px] !tracking-[0.18em] uppercase">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#3fe0c5] shadow-[0_0_8px_#3fe0c5]" /> Neural vocal studio
               </span>
             </Reveal>
 
-            {/* Clean, well-proportioned headline */}
             <Reveal delay={100}>
-              <h1 className="mt-6 text-3xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.08]" style={{ fontFamily: "var(--font-display)" }}>
+              <h1 className="mt-6 text-[2.6rem] sm:text-6xl lg:text-7xl font-bold tracking-[-0.035em] leading-[1.02]" style={{ fontFamily: 'var(--font-display)' }}>
                 Sing it your way.<br />
                 <span className="text-white/90">Hear it </span>
-                <span
-                  className="font-accent bg-clip-text text-transparent pr-2"
-                  style={{ backgroundImage: `linear-gradient(100deg, ${GOLD}, #ffe2b0 45%, ${TEAL})` }}
-                >
+                <span className="font-accent bg-clip-text text-transparent pr-2" style={{ backgroundImage: `linear-gradient(100deg, ${GOLD}, #ffe2b0 45%, ${TEAL})` }}>
                   perfected.
                 </span>
               </h1>
             </Reveal>
 
             <Reveal delay={200}>
-              <p className="mx-auto lg:mx-0 mt-5 max-w-xl text-base sm:text-lg text-white/65 leading-relaxed">
-                Lyra fixes your pitch and timing against the original track, then sings it back in your own voice — or as an AI legend. Studio stems, key detection, and MIDI included.
+              <p className="mx-auto lg:mx-0 mt-6 max-w-xl text-base sm:text-lg text-white/60 leading-relaxed">
+                Lyra tunes your take, then sings it back in your own voice — or as Arijit Singh, Sonu Nigam or KK. Stems, key, BPM and MIDI included.
               </p>
-
-              <div className="mx-auto lg:mx-0 mt-4 max-w-xl flex flex-wrap justify-center lg:justify-start gap-2 text-[11px] font-mono text-white/60">
-                <span className="rounded-full border border-[#3fe0c5]/30 bg-[#3fe0c5]/[0.06] px-3 py-1 text-[#3fe0c5]">Seed-VC · 44.1 kHz Hi-Fi</span>
-                <span className="rounded-full border border-[#e5a958]/30 bg-[#e5a958]/[0.06] px-3 py-1 text-[#e5a958]">RVC v2 · 48 kHz Metal</span>
-                <span className="rounded-full border border-white/15 px-3 py-1 text-white/70">Apple Silicon Zero-Cache</span>
-              </div>
             </Reveal>
 
-            {/* ONLY ONE PRIMARY BUTTON TO CONVERT VOICE */}
             <Reveal delay={300}>
-              <div className="mt-9 flex justify-center lg:justify-start">
-                <button
-                  type="button"
-                  onClick={() => launch(undefined, { mode: 'convert' })}
-                  className="shine-btn group inline-flex items-center justify-center gap-3 rounded-full bg-gradient-to-r from-[#e5a958] to-[#f5ba6e] text-black font-bold text-base px-8 py-4 cursor-pointer shadow-[0_0_35px_rgba(229,169,88,0.35)] hover:shadow-[0_0_50px_rgba(229,169,88,0.6)] hover:scale-[1.02] active:scale-[0.98] transition-all"
-                >
-                  <Sparkles className="w-5 h-5 text-black" />
-                  <span>Convert Voice Now</span>
-                  <ArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1.5" />
+              <div className="mt-9 flex flex-wrap justify-center lg:justify-start gap-3">
+                <button type="button" onClick={() => launch(undefined, { mode: 'convert' })} className="btn btn-primary btn-lg shine-btn group">
+                  <Sparkles /> Open the studio
+                  <ArrowRight className="transition-transform group-hover:translate-x-1" />
+                </button>
+                <button type="button" onClick={() => document.getElementById('guide')?.scrollIntoView({ behavior: 'smooth' })} className="btn btn-secondary btn-lg">
+                  <Play /> How it works
                 </button>
               </div>
             </Reveal>
-          </div>
 
-          {/* Right Column: Live Neural Console Preview (Replaces Clunky 3D Orb) */}
-          <div className="relative">
-            <Reveal delay={200}>
-              <HeroConsolePreview />
+            <Reveal delay={400}>
+              <div className="mt-10 grid grid-cols-3 gap-4 max-w-md mx-auto lg:mx-0">
+                {[['2', 'singing engines'], ['3', 'legend voices + yours'], ['5', 'stems per render']].map(([n, l]) => (
+                  <div key={l} className="text-left">
+                    <div className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>{n}</div>
+                    <div className="text-xs text-white/45">{l}</div>
+                  </div>
+                ))}
+              </div>
             </Reveal>
           </div>
+
+          <Reveal delay={200}>
+            <HeroIllustration />
+          </Reveal>
         </div>
 
         <button
           type="button"
-          onClick={() => document.getElementById('benchmarks')?.scrollIntoView({ behavior: 'smooth' })}
+          onClick={() => document.getElementById('guide')?.scrollIntoView({ behavior: 'smooth' })}
           className="absolute bottom-5 left-1/2 -translate-x-1/2 text-white/40 hover:text-white/80 transition cursor-pointer"
           aria-label="Scroll down"
         >
@@ -776,34 +594,16 @@ export default function LandingPage({ onLaunchStudio }) {
         </button>
       </section>
 
-      {/* ============================================================ MARQUEE */}
-      <div className="relative border-y border-white/10 bg-black/60 py-4 overflow-hidden">
-        <div className="marquee flex gap-12 whitespace-nowrap text-sm uppercase tracking-[0.25em] text-white/40">
-          {Array.from({ length: 2 }).map((_, k) => (
-            <div key={k} className="flex gap-12 shrink-0">
-              {['RoFormer separation', 'Lead / backing split', 'De-reverb', 'Note-level tuning', 'Guide melody', 'Timing alignment', 'Auto-tune & pitch snap', 'Diatonic harmony', 'MIDI export', '24-bit stems'].map((w) => (
-                <span key={w} className="flex items-center gap-12">{w}<span style={{ color: GOLD }}>✦</span></span>
-              ))}
-            </div>
-          ))}
-        </div>
-      </div>
+      <FeatureRibbon />
 
-      {/* ============================================================ BENCHMARK SECTION */}
+      <GuideSection onLaunch={launch} />
+
       <BenchmarkSection />
 
-      {/* ============================================================ ENGINE & NEW USER GUIDE */}
-      <EngineGuideSection />
-
       {/* =============================================================== DEMO */}
-      <section id="demo" className="relative py-24 sm:py-32 px-4 sm:px-6">
+      <section id="demo" className="relative py-24 sm:py-32 px-4 sm:px-6 border-t border-white/[0.05]">
         <div className="max-w-6xl mx-auto">
-          <Reveal>
-            <p className="text-xs tracking-[0.3em] uppercase" style={{ color: TEAL }}>Play with it</p>
-            <h2 className="mt-3 text-3xl sm:text-5xl font-bold tracking-tight max-w-3xl" style={{ fontFamily: "var(--font-display)" }}>
-              Drag the sliders. Watch a shaky take become a melody.
-            </h2>
-          </Reveal>
+          <SectionHead eyebrow="Play with it" icon={SlidersHorizontal} color={TEAL} title="Drag the sliders. Watch a shaky take become a melody." />
           <Reveal delay={150} className="mt-12">
             <PitchDemo />
           </Reveal>
@@ -815,17 +615,12 @@ export default function LandingPage({ onLaunchStudio }) {
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_80%_50%,rgba(229,169,88,0.08),transparent_60%)]" />
         <div className="relative max-w-6xl mx-auto grid lg:grid-cols-2 gap-14 items-center">
           <div>
-            <Reveal>
-              <p className="text-xs tracking-[0.3em] uppercase" style={{ color: GOLD }}>My Voice mode</p>
-              <h2 className="mt-3 text-3xl sm:text-5xl font-bold tracking-tight" style={{ fontFamily: "var(--font-display)" }}>
-                For people who love singing more than they're good at it.
-              </h2>
-            </Reveal>
+            <SectionHead eyebrow="Vocal Take mode" icon={Mic2} title="For people who love singing more than they're good at it." />
             <div className="mt-10 space-y-6">
               {[
-                ['01', 'Sing your take', 'Record in the studio or upload. Add the original song as a guide if you have it.'],
-                ['02', 'Lyra makes it musical', 'Your phrasing lands on the original timing; every note moves onto the melody; wobble is steadied.'],
-                ['03', 'Choose who sings', 'Keep your own voice — fixed and in tune — or hand the performance to a voice model.'],
+                ['01', 'Sing your take', 'Record in the studio or upload a vocal. Lyra auto-tunes it as soon as it lands.'],
+                ['02', 'Compare before you commit', 'Flip between Fixed Notes and Raw in the preview player — pick what sounds like you.'],
+                ['03', 'Choose who sings', 'Keep my voice — fixed and in tune — or hand the performance to a singer model.'],
               ].map(([n, t, b], i) => (
                 <Reveal key={n} delay={i * 120}>
                   <div className="flex gap-5 group">
@@ -839,63 +634,34 @@ export default function LandingPage({ onLaunchStudio }) {
               ))}
             </div>
             <Reveal delay={400}>
-              <button
-                type="button"
-                onClick={() => launch(undefined, { mode: 'my_voice' })}
-                className="mt-10 inline-flex items-center gap-2 rounded-full border border-[#e5a958]/50 text-[#e5a958] px-6 py-3 hover:bg-[#e5a958] hover:text-black transition cursor-pointer font-medium"
-              >
-                Start singing <ArrowRight className="w-4 h-4" />
+              <button type="button" onClick={() => launch(undefined, { mode: 'my_voice' })} className="mt-10 btn btn-outline-gold btn-lg">
+                Start singing <ArrowRight />
               </button>
             </Reveal>
           </div>
 
-          {/* Clean Vocal Spectrum Card (Ribbon Removed) */}
           <Reveal delay={200}>
-            <div className="rounded-3xl border border-white/10 bg-gradient-to-b from-[#14171d] to-[#0a0c0f] p-8 shadow-2xl relative overflow-hidden">
-              <div className="flex justify-between items-center text-xs font-mono pb-4 border-b border-white/10">
-                <span className="text-rose-300">Raw Microphone Take (Wobble: ±42¢)</span>
-                <span className="text-[#3fe0c5]">Lyra Polished (0¢ Snapped)</span>
-              </div>
-
-              <div className="my-8 py-6 px-4 bg-black/40 rounded-2xl border border-white/5 space-y-4">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-white/60">Pitch Correction Fidelity</span>
-                  <span className="font-mono text-emerald-400 font-bold">100% In-Key</span>
-                </div>
-                <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-                  <div className="h-full bg-emerald-400 rounded-full w-[96%]" />
-                </div>
-
-                <div className="flex items-center justify-between text-xs pt-2">
-                  <span className="text-white/60">Timing Alignment to Guide</span>
-                  <span className="font-mono text-[#3fe0c5] font-bold">Sample-Locked</span>
-                </div>
-                <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-                  <div className="h-full bg-[#3fe0c5] rounded-full w-[94%]" />
+            <div className="panel rim-glow p-5 sm:p-7">
+              <div className="flex items-center justify-between mb-4">
+                <span className="eyebrow text-white/50">Pitch curve</span>
+                <div className="flex gap-2">
+                  <span className="chip chip-rose">±42¢ before</span>
+                  <span className="chip chip-teal">±3¢ after</span>
                 </div>
               </div>
-
-              <div className="space-y-3">
-                {[['Target Output', 'Your Voice (In Tune) or AI Legend'], ['Sound Texture', 'Studio Grade · Denoised · De-Reverbed']].map(([k, v]) => (
-                  <div key={k} className="flex justify-between items-center rounded-xl bg-black/50 backdrop-blur border border-white/10 px-4 py-2.5 text-sm">
-                    <span className="text-white/50">{k}</span><span className="font-medium text-white/90">{v}</span>
-                  </div>
-                ))}
-              </div>
+              <TuneIllustration />
             </div>
           </Reveal>
         </div>
       </section>
 
+      <EnginesSection />
+
       {/* ============================================================ PIPELINE */}
       <section id="features" className="relative py-24 sm:py-32 px-4 sm:px-6">
         <div className="max-w-6xl mx-auto">
-          <Reveal>
-            <p className="text-xs tracking-[0.3em] uppercase" style={{ color: TEAL }}>How it works</p>
-            <h2 className="mt-3 text-3xl sm:text-5xl font-bold tracking-tight max-w-3xl" style={{ fontFamily: "var(--font-display)" }}>
-              Five stages. One render. No robotic autotune passes.
-            </h2>
-          </Reveal>
+          <SectionHead eyebrow="Under the hood" icon={Layers} color={TEAL} title="Five stages. One render. No robotic autotune passes." />
+
           <div className="mt-14 grid sm:grid-cols-2 lg:grid-cols-5 gap-4">
             {PIPELINE.map((s, i) => (
               <Reveal key={s.title} delay={i * 100}>
@@ -922,12 +688,7 @@ export default function LandingPage({ onLaunchStudio }) {
       {/* ============================================================== VOICES */}
       <section id="models" className="relative py-24 sm:py-32 px-4 sm:px-6">
         <div className="max-w-6xl mx-auto">
-          <Reveal>
-            <p className="text-xs tracking-[0.3em] uppercase" style={{ color: GOLD }}>Voices</p>
-            <h2 className="mt-3 text-3xl sm:text-5xl font-bold tracking-tight" style={{ fontFamily: "var(--font-display)" }}>
-              Three legends. And you.
-            </h2>
-          </Reveal>
+          <SectionHead eyebrow="Voices" icon={Mic2} title={<>Three legends. <span className="font-accent text-[#e5a958]">And you.</span></>} />
           <div className="mt-14 grid md:grid-cols-2 lg:grid-cols-4 gap-5">
             {VOICES.map((v, i) => (
               <Reveal key={v.key} delay={i * 100}>
@@ -1001,15 +762,15 @@ export default function LandingPage({ onLaunchStudio }) {
       {/* ================================================================= FAQ */}
       <section id="faq" className="relative py-24 sm:py-32 px-4 sm:px-6">
         <div className="max-w-3xl mx-auto">
-          <Reveal>
-            <h2 className="text-3xl sm:text-5xl font-bold tracking-tight" style={{ fontFamily: "var(--font-display)" }}>Questions</h2>
-          </Reveal>
+          <SectionHead eyebrow="FAQ" icon={Info} title="Questions" />
           <div className="mt-10 divide-y divide-white/10 border-y border-white/10">
             {FAQ.map(([q, a], i) => (
               <Reveal key={q} delay={i * 60}>
                 <button type="button" onClick={() => setOpenFaq(openFaq === i ? null : i)} className="w-full text-left py-5 flex items-center justify-between gap-6 cursor-pointer group">
-                  <span className="text-lg font-medium group-hover:text-[#e5a958] transition-colors">{q}</span>
-                  <ChevronDown className={`w-5 h-5 shrink-0 text-white/50 transition-transform duration-300 ${openFaq === i ? 'rotate-180' : ''}`} />
+                  <span className="text-base sm:text-lg font-medium group-hover:text-[#e5a958] transition-colors">{q}</span>
+                  <span className={`w-8 h-8 shrink-0 rounded-full grid place-items-center border border-white/10 transition-all duration-300 ${openFaq === i ? 'rotate-180 bg-white/10' : ''}`}>
+                    <ChevronDown className="w-4 h-4 text-white/60" />
+                  </span>
                 </button>
                 <div className={`grid transition-all duration-500 ${openFaq === i ? 'grid-rows-[1fr] opacity-100 pb-5' : 'grid-rows-[0fr] opacity-0'}`}>
                   <p className="overflow-hidden text-white/60 leading-relaxed">{a}</p>
@@ -1022,24 +783,24 @@ export default function LandingPage({ onLaunchStudio }) {
 
       {/* ================================================================= CTA */}
       <section className="relative py-28 px-4 sm:px-6 overflow-hidden border-t border-white/5">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(229,169,88,0.08),#07080a_70%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(229,169,88,0.1),#07080a_70%)]" />
         <Reveal className="relative max-w-3xl mx-auto text-center">
           <div className="flex justify-center"><LyraLogo /></div>
-          <h2 className="mt-6 text-3xl sm:text-5xl font-bold tracking-tight" style={{ fontFamily: "var(--font-display)" }}>Your song is waiting.</h2>
-          <p className="mt-4 text-white/70 text-base sm:text-lg">Upload a take, paste a link, or record your voice.</p>
-          <button
-            type="button"
-            onClick={() => launch(undefined, { mode: 'convert' })}
-            className="shine-btn group mt-9 inline-flex items-center gap-3 rounded-full bg-gradient-to-r from-[#e5a958] to-[#f5ba6e] text-black font-bold text-base px-8 py-4 cursor-pointer shadow-[0_0_35px_rgba(229,169,88,0.35)] hover:shadow-[0_0_50px_rgba(229,169,88,0.6)]"
-          >
-            <span>Open Studio Workspace</span>
-            <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+          <h2 className="mt-6 text-3xl sm:text-5xl font-bold tracking-tight" style={{ fontFamily: 'var(--font-display)' }}>
+            Your song is <span className="font-accent text-[#e5a958]">waiting.</span>
+          </h2>
+          <p className="mt-4 text-white/60 text-base sm:text-lg">Upload a take, paste a link, or record your voice.</p>
+          <button type="button" onClick={() => launch(undefined, { mode: 'convert' })} className="btn btn-primary btn-lg shine-btn group mt-9">
+            Open the studio <ArrowRight className="transition-transform group-hover:translate-x-1" />
           </button>
         </Reveal>
       </section>
 
-      <footer className="border-t border-white/10 py-8 px-6 text-center text-xs text-white/35">
-        Lyra — Neural Vocal Timbre Studio. Keep renders of real artists' voices private.
+      <footer className="border-t border-white/10 py-8 px-6">
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-white/35">
+          <div className="flex items-center gap-2.5"><LyraLogo /><span className="font-semibold tracking-[0.2em] text-white/60" style={{ fontFamily: 'var(--font-display)' }}>LYRA</span></div>
+          <span>Neural vocal studio. Keep renders of real artists' voices private.</span>
+        </div>
       </footer>
     </main>
   );
