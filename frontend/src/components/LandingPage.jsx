@@ -588,9 +588,9 @@ function EngineGuideSection() {
               {[
                 {
                   step: '01',
-                  title: 'Choose or Train Voice',
-                  desc: 'Pick an AI legend (Arijit, Sonu, KK) or open the Voice Lab to train your own personal model from your microphone.',
-                  tag: 'Voice Persona',
+                  title: 'Select Singer & Model Engine',
+                  desc: 'Pick an AI legend (Arijit Singh, Sonu Nigam, KK) and select your preferred engine: RVC v2 (48 kHz) or Seed-VC (44.1 kHz).',
+                  tag: 'Voice & Engine Selection',
                 },
                 {
                   step: '02',
@@ -685,7 +685,7 @@ const PIPELINE = [
 
 const FAQ = [
   ['I can\'t sing. Will this actually help?', 'Yes — that\'s what My Voice mode is for. Sing your take (optionally over the original song). Lyra aligns your timing to the original, moves your notes onto the melody, steadies wobble and can add gentle vibrato. Then you choose: keep your own voice, or have it sung by a voice model.'],
-  ['How do I keep sounding like me?', 'Pick "Your voice" as the target. Without training, Lyra re-synthesizes your own timbre with the corrected melody. For the best quality, record in the full-page Voice Lab and fine-tune your personal model.'],
+  ['Can I fix pitch and auto-tune my vocal recording?', 'Yes! When you record your vocal take or upload an a cappella audio clip, toggle the "Fix Pitch & Auto-Tune" checkbox. When active, it locks your melody to the detected key and scale; uncheck it to preserve raw microtonal nuances.'],
   ['What do composers get out of it?', 'Every render exports 24-bit dry stems (converted lead, harmony, original backing vocals, instrumental), a MIDI file of the final melody, and the detected key and tempo. You can re-render a single section with new settings without redoing the song.'],
   ['Which AI models does Lyra use?', 'Two singing engines: Seed-VC singing (a 2024 diffusion model with Whisper and BigVGAN, 44.1 kHz) sings as a voice from a short sample, and RVC v2 (trained at up to 48 kHz) keeps the tightest pitch and cleanest audio.'],
   ['Which hardware do I need?', 'Apple Silicon Macs (M1/M2/M3/M4) run natively on Metal with zero memory leaks (~219 MB). NVIDIA GPUs run with CUDA. Everything also runs on CPU, just slower.'],
@@ -781,7 +781,7 @@ export default function LandingPage({ onLaunchStudio }) {
         <div className="marquee flex gap-12 whitespace-nowrap text-sm uppercase tracking-[0.25em] text-white/40">
           {Array.from({ length: 2 }).map((_, k) => (
             <div key={k} className="flex gap-12 shrink-0">
-              {['RoFormer separation', 'Lead / backing split', 'De-reverb', 'Note-level tuning', 'Guide melody', 'Timing alignment', 'Personal voice training', 'Diatonic harmony', 'MIDI export', '24-bit stems'].map((w) => (
+              {['RoFormer separation', 'Lead / backing split', 'De-reverb', 'Note-level tuning', 'Guide melody', 'Timing alignment', 'Auto-tune & pitch snap', 'Diatonic harmony', 'MIDI export', '24-bit stems'].map((w) => (
                 <span key={w} className="flex items-center gap-12">{w}<span style={{ color: GOLD }}>✦</span></span>
               ))}
             </div>
@@ -946,18 +946,18 @@ export default function LandingPage({ onLaunchStudio }) {
               </Reveal>
             ))}
             <Reveal delay={300}>
-              <TiltCard className="h-[420px] border-dashed border-[#e5a958]/40" glow={GOLD} onClick={() => launch(undefined, { mode: 'my_voice', openVoiceLab: true })}>
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,rgba(229,169,88,0.14),transparent_60%)]" />
+              <TiltCard className="h-[420px] border border-cyan-500/30" glow={TEAL} onClick={() => launch(undefined, { mode: 'convert' })}>
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,rgba(63,224,197,0.12),transparent_60%)]" />
                 <Glyph3D kind="render" className="absolute inset-x-0 top-6 h-56 opacity-90" />
                 <div className="relative h-full p-6 flex flex-col">
-                  <div className="pulse-ring w-14 h-14 rounded-full grid place-items-center border border-[#e5a958]/50 mx-auto mt-24 bg-black/50 backdrop-blur">
-                    <Users className="w-6 h-6" style={{ color: GOLD }} />
+                  <div className="pulse-ring w-14 h-14 rounded-full grid place-items-center border border-cyan-400/50 mx-auto mt-24 bg-black/50 backdrop-blur">
+                    <Cpu className="w-6 h-6" style={{ color: TEAL }} />
                   </div>
                   <div className="mt-auto">
-                    <h3 className="text-2xl font-bold" style={{ fontFamily: "var(--font-display)" }}>Your Voice</h3>
-                    <p className="text-sm mt-1" style={{ color: GOLD }}>Personal model • trained on you</p>
-                    <p className="text-sm text-white/55 mt-3">Record 5–15 minutes in the Voice Lab. Lyra fine-tunes a model that sings as you — in tune.</p>
-                    <span className="mt-5 inline-flex items-center gap-1.5 text-sm text-white/80 group-hover:gap-3 transition-all">Open Voice Lab <ArrowRight className="w-4 h-4" /></span>
+                    <h3 className="text-2xl font-bold" style={{ fontFamily: "var(--font-display)" }}>Dual AI Engines</h3>
+                    <p className="text-sm mt-1" style={{ color: TEAL }}>RVC v2 (48 kHz) • Seed-VC (44.1 kHz DiT)</p>
+                    <p className="text-sm text-white/55 mt-3">Choose either RVC or Seed-VC for all 3 singers. Seamless zero-shot conversion with built-in pitch fixing.</p>
+                    <span className="mt-5 inline-flex items-center gap-1.5 text-sm text-white/80 group-hover:gap-3 transition-all">Launch Studio Converter <ArrowRight className="w-4 h-4" /></span>
                   </div>
                 </div>
               </TiltCard>

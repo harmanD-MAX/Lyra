@@ -31,7 +31,7 @@ function StepTitle({ n, children }) {
   );
 }
 
-export default function CreativeControls({ open, onClose, creative, setCreative, selectedModel, setSelectedModel, personalVoices, onOpenVoiceLab }) {
+export default function CreativeControls({ open, onClose, creative, setCreative, selectedModel, setSelectedModel, personalVoices }) {
   const guideInput = useRef(null);
   const [engineInfo, setEngineInfo] = useState(null);
   useEffect(() => {
@@ -121,7 +121,6 @@ export default function CreativeControls({ open, onClose, creative, setCreative,
                 <Cpu className="w-3.5 h-3.5 text-[#3fe0c5]" /> Sings with {engineLine}
               </p>
             )}
-            <button type="button" onClick={onOpenVoiceLab} className="mt-2 text-xs text-[#e5a958] hover:underline cursor-pointer">Want it to sound exactly like you? Train your voice →</button>
           </section>
 
           {/* Guide (My Voice only) */}

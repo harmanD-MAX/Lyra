@@ -4,7 +4,6 @@ import LandingPage from './components/LandingPage';
 import StudioView from './components/StudioView';
 import CreativeControls from './components/CreativeControls';
 import { DEFAULT_CREATIVE, creativeSummary, resolveCreative } from './creative';
-import VoiceLab from './components/VoiceLab';
 
 export default function App() {
   // Navigation view: 'landing' | 'studio'
@@ -30,7 +29,6 @@ export default function App() {
   // Creative controls (mode, melody engine, guide, harmony) & personal voices
   const [creative, setCreative] = useState(DEFAULT_CREATIVE);
   const [showCreative, setShowCreative] = useState(false);
-  const [showVoiceLab, setShowVoiceLab] = useState(false);
   const [personalVoices, setPersonalVoices] = useState([]);
 
   const refreshVoices = useCallback(() => {
@@ -70,7 +68,6 @@ export default function App() {
       if (opts.mode === 'my_voice' && !modelKey) setSelectedModel('raw');
       if (opts.mode === 'convert' && selectedModel === 'raw' && !modelKey) setSelectedModel('arijit_singh');
     }
-    if (opts.openVoiceLab) setShowVoiceLab(true);
 
     if (view === 'studio') {
       if (currentView !== 'studio') {
@@ -161,7 +158,7 @@ export default function App() {
     };
   }, [activeJobId]);
 
-  const handleStartConversion = async (overrideMode) => {
+  const handleStartConversion = async (overrideMode, options = {}) => {
     setErrorMsg('');
 
     // Determine mode based on attached media
@@ -210,9 +207,12 @@ export default function App() {
       return;
     }
 
+    const engineToUse = options.engine || r.engine || 'rvc';
+    const fixPitchToUse = options.fixPitch !== undefined ? options.fixPitch : (r.pitchMode !== 'off');
+
     formData.append('mode', c.studioMode);
     formData.append('model_name', selectedModel);
-    formData.append('engine', r.engine);
+    formData.append('engine', engineToUse);
     formData.append('pitch_shift', 0);
     formData.append('style_strength', 1.0);
     formData.append('f0_method', 'rmvpe');
@@ -224,10 +224,10 @@ export default function App() {
     formData.append('warmth', 0.50);
     formData.append('clarity', 0.85);
     // Melody engine (pitch correction happens on the F0 curve, once)
-    formData.append('apply_autotune', r.pitchMode !== 'off');
-    formData.append('pitch_mode', r.pitchMode);
+    formData.append('apply_autotune', fixPitchToUse);
+    formData.append('pitch_mode', fixPitchToUse ? (r.pitchMode === 'off' ? 'auto' : r.pitchMode) : 'off');
     formData.append('key', r.key);
-    formData.append('autotune_strength', r.correction);
+    formData.append('autotune_strength', fixPitchToUse ? r.correction : 0.0);
     formData.append('steadiness', r.steadiness);
     formData.append('vibrato', r.vibrato);
     formData.append('retune_ms', r.retuneMs);
@@ -311,7 +311,6 @@ export default function App() {
               || ({ arijit_singh: 'Arijit Singh', sonu_nigam: 'Sonu Nigam', kk: 'KK' }[selectedModel] || selectedModel)
           )}
           onOpenCreative={() => setShowCreative(true)}
-          onOpenVoiceLab={() => { refreshVoices(); setShowVoiceLab(true); }}
         />
       )}
 
@@ -323,13 +322,6 @@ export default function App() {
         selectedModel={selectedModel}
         setSelectedModel={setSelectedModel}
         personalVoices={personalVoices}
-        onOpenVoiceLab={() => { refreshVoices(); setShowVoiceLab(true); }}
-      />
-      <VoiceLab
-        open={showVoiceLab}
-        onClose={() => setShowVoiceLab(false)}
-        voices={personalVoices}
-        onVoicesChanged={refreshVoices}
       />
 
     </div>
