@@ -1,7 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Header from './components/Header';
 import LandingPage from './components/LandingPage';
 import StudioView from './components/StudioView';
+import CreativeControls from './components/CreativeControls';
+import { DEFAULT_CREATIVE, creativeSummary, resolveCreative } from './creative';
+import VoiceLab from './components/VoiceLab';
 
 export default function App() {
   // Navigation view: 'landing' | 'studio'
@@ -24,6 +27,21 @@ export default function App() {
   const [recentJobs, setRecentJobs] = useState([]);
   const [sysInfo, setSysInfo] = useState(null);
 
+  // Creative controls (mode, melody engine, guide, harmony) & personal voices
+  const [creative, setCreative] = useState(DEFAULT_CREATIVE);
+  const [showCreative, setShowCreative] = useState(false);
+  const [showVoiceLab, setShowVoiceLab] = useState(false);
+  const [personalVoices, setPersonalVoices] = useState([]);
+
+  const refreshVoices = useCallback(() => {
+    fetch('/api/voices')
+      .then(res => res.json())
+      .then(data => setPersonalVoices(data.voices || []))
+      .catch(() => { });
+  }, []);
+
+  useEffect(() => { refreshVoices(); }, [refreshVoices]);
+
   const pollIntervalRef = useRef(null);
 
   // Synchronize browser history and handle back/forward navigation
@@ -45,8 +63,14 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  const navigateTo = (view, modelKey) => {
+  const navigateTo = (view, modelKey, opts = {}) => {
     if (modelKey) setSelectedModel(modelKey);
+    if (opts.mode) {
+      setCreative((c) => ({ ...c, studioMode: opts.mode }));
+      if (opts.mode === 'my_voice' && !modelKey) setSelectedModel('raw');
+      if (opts.mode === 'convert' && selectedModel === 'raw' && !modelKey) setSelectedModel('arijit_singh');
+    }
+    if (opts.openVoiceLab) setShowVoiceLab(true);
 
     if (view === 'studio') {
       if (currentView !== 'studio') {
@@ -177,21 +201,45 @@ export default function App() {
       formData.append('spotify_url', spotifyUrl.trim());
     }
 
+    const c = creative;
+    const r = resolveCreative(c);
+    const myVoice = c.studioMode === 'my_voice';
+    if (selectedModel === 'raw' && !myVoice) {
+      setErrorMsg('"Your voice" is a My Voice target. Switch mode in Creative controls or pick another voice.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    formData.append('mode', c.studioMode);
     formData.append('model_name', selectedModel);
     formData.append('pitch_shift', 0);
-    formData.append('style_strength', 1.0);        // 100% Full Authentic Singer Phrasing & Style
-    formData.append('f0_method', 'rmvpe');         // Continuous sub-cent neural pitch tracking
-    formData.append('index_rate', 0.28);           // Sweet spot: 0 warping on rapid ornamentation
-    formData.append('protect', 0.50);              // Smooth transition protection
-    formData.append('vocal_gain_db', 0.0);         // Natural clean vocal
-    formData.append('inst_gain_db', 0.0);          // Natural backing music
+    formData.append('style_strength', 1.0);
+    formData.append('f0_method', 'rmvpe');
+    formData.append('protect', 0.33);              // shields consonants & breaths
+    formData.append('vocal_gain_db', 0.0);
+    formData.append('inst_gain_db', 0.0);
     formData.append('reverb_amount', 0.0);
     formData.append('echo_amount', 0.0);
     formData.append('warmth', 0.50);
     formData.append('clarity', 0.85);
-    formData.append('apply_autotune', true);       // Praat PSOLA smooth 35ms retune speed
-    formData.append('autotune_strength', 0.50);
-    formData.append('has_music', activeMode !== 'record');
+    // Melody engine (pitch correction happens on the F0 curve, once)
+    formData.append('apply_autotune', r.pitchMode !== 'off');
+    formData.append('pitch_mode', r.pitchMode);
+    formData.append('key', r.key);
+    formData.append('autotune_strength', r.correction);
+    formData.append('steadiness', r.steadiness);
+    formData.append('vibrato', r.vibrato);
+    formData.append('retune_ms', r.retuneMs);
+    formData.append('harmony', selectedModel === 'raw' ? 'none' : r.harmony);
+    formData.append('split_backing', r.splitBacking);
+    formData.append('dereverb', r.dereverb);
+    // A recorded or "My Voice" take is a bare vocal unless it's a full song link
+    formData.append('has_music', !(activeMode === 'record' || (myVoice && activeMode === 'file')));
+    if (myVoice) {
+      if (c.guideFile) formData.append('guide_file', c.guideFile);
+      else if (c.guideUrl.trim()) formData.append('guide_url', c.guideUrl.trim());
+      formData.append('align_timing', r.alignTiming);
+    }
 
     try {
       const response = await fetch('/api/convert', {
@@ -223,7 +271,7 @@ export default function App() {
             onViewChange={navigateTo}
           />
           <LandingPage
-            onLaunchStudio={(modelKey) => navigateTo('studio', modelKey)}
+            onLaunchStudio={(modelKey, opts) => navigateTo('studio', modelKey, opts)}
           />
         </>
       ) : (
@@ -254,8 +302,34 @@ export default function App() {
           }}
           onBackToLanding={() => navigateTo('landing')}
           onDeleteJob={handleDeleteJob}
+          personalVoices={personalVoices}
+          creativeSummaryText={creativeSummary(
+            creative,
+            selectedModel === 'raw' ? 'Your voice'
+              : personalVoices.find((v) => v.id === selectedModel)?.name
+              || ({ arijit_singh: 'Arijit Singh', sonu_nigam: 'Sonu Nigam', kk: 'KK' }[selectedModel] || selectedModel)
+          )}
+          onOpenCreative={() => setShowCreative(true)}
+          onOpenVoiceLab={() => { refreshVoices(); setShowVoiceLab(true); }}
         />
       )}
+
+      <CreativeControls
+        open={showCreative}
+        onClose={() => setShowCreative(false)}
+        creative={creative}
+        setCreative={setCreative}
+        selectedModel={selectedModel}
+        setSelectedModel={setSelectedModel}
+        personalVoices={personalVoices}
+        onOpenVoiceLab={() => { refreshVoices(); setShowVoiceLab(true); }}
+      />
+      <VoiceLab
+        open={showVoiceLab}
+        onClose={() => setShowVoiceLab(false)}
+        voices={personalVoices}
+        onVoicesChanged={refreshVoices}
+      />
 
     </div>
   );

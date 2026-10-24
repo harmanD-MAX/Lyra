@@ -240,6 +240,7 @@ class VC:
         protect,
         singing_style=None,
         style_strength=0.85,
+        pitch_options=None,
     ):
         if input_audio_path is None:
             return inference_status("单次推理", "等待输入", i18n("请上传音频文件")), None
@@ -284,6 +285,7 @@ class VC:
                 protect,
                 singing_style=singing_style,
                 style_strength=style_strength,
+                pitch_options=pitch_options,
             )
             if self.tgt_sr != resample_sr >= 16000:
                 tgt_sr = resample_sr
