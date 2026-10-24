@@ -291,6 +291,40 @@ export default function StudioView({
 
   // When job completes or changes, auto-load track
   const currentResults = currentJob?.results;
+  const isCloudOnly = Boolean(
+    currentResults?.saved_to_cloud ||
+    currentResults?.cloud_master_3d_url ||
+    currentJob?.saved_to_cloud ||
+    currentJob?.results?.saved_to_cloud
+  );
+
+  // If saved in Cloudflare R2, only Master 3D is saved/available in the cloud
+  const availableStems = useMemo(() => {
+    if (isCloudOnly) {
+      return STEMS.filter((s) => s.id === 'master');
+    }
+    return STEMS;
+  }, [isCloudOnly]);
+
+  const activeStemKeys = useMemo(() => {
+    return availableStems.map((s) => s.id);
+  }, [availableStems]);
+
+  // If cloud-only, force active track to master so invalid stems cannot be requested
+  useEffect(() => {
+    if (isCloudOnly && activeTrack !== 'master') {
+      setActiveTrack('master');
+    }
+  }, [isCloudOnly, activeTrack]);
+
+  // Only songs saved to Cloudflare R2 are displayed in Library / My Songs
+  const cloudSavedJobs = useMemo(() => {
+    return recentJobs.filter((j) => {
+      const r = j.results || {};
+      return Boolean(r.saved_to_cloud || r.cloud_master_3d_url || j.saved_to_cloud);
+    });
+  }, [recentJobs]);
+
   const singerName = currentResults?.singer || (
     selectedModel === 'raw' ? 'Your Voice'
       : personalVoices.find((v) => v.id === selectedModel)?.name
@@ -360,8 +394,14 @@ export default function StudioView({
     if (action === 'new_song') {
       handleStartNewSong();
     } else if (action === 'back') {
+      if (currentJob?.id && !currentResults?.saved_to_cloud) {
+        fetch(`/api/jobs/${currentJob.id}`, { method: 'DELETE' }).catch(() => {});
+      }
       onBackToLanding && onBackToLanding();
     } else if (action.type === 'switch_song') {
+      if (currentJob?.id && !currentResults?.saved_to_cloud) {
+        fetch(`/api/jobs/${currentJob.id}`, { method: 'DELETE' }).catch(() => {});
+      }
       setActiveJobId(action.jobId);
       setActiveTab('studio');
     }
@@ -382,6 +422,9 @@ export default function StudioView({
       setPendingAction('back');
       setShowCloudModal(true);
     } else {
+      if (currentJob?.id && !currentResults?.saved_to_cloud) {
+        fetch(`/api/jobs/${currentJob.id}`, { method: 'DELETE' }).catch(() => {});
+      }
       onBackToLanding && onBackToLanding();
     }
   };
@@ -402,7 +445,10 @@ export default function StudioView({
 
   // Reset to create a brand new song (shows upload dock again)
   const handleStartNewSong = () => {
-    STEM_KEYS.forEach(k => {
+    if (currentJob?.id && !currentResults?.saved_to_cloud) {
+      fetch(`/api/jobs/${currentJob.id}`, { method: 'DELETE' }).catch(() => {});
+    }
+    activeStemKeys.forEach(k => {
       const el = stemAudiosRef.current[k];
       if (el) {
         try {
@@ -467,18 +513,18 @@ export default function StudioView({
 
   const getAudioSource = () => getStemSource(activeTrack);
 
-  // Decoded samples of the stem that's playing, for the live visualizer
+  // Decoded samples of the master track for the live spectrum ring visualizer (cached once per song)
   const [decodedEntry, setDecodedEntry] = useState(null);
-  const activeStemSrc = currentJob?.id && currentResults ? getStemSource(activeTrack) : '';
+  const masterAudioSrc = currentJob?.id && currentResults ? getStemSource('master') : '';
   useEffect(() => {
-    if (!activeStemSrc) return undefined;
+    if (!masterAudioSrc) return undefined;
     let alive = true;
-    decodeTrack(activeStemSrc)
-      .then((t) => { if (alive) setDecodedEntry({ src: activeStemSrc, track: t }); })
+    decodeTrack(masterAudioSrc)
+      .then((t) => { if (alive) setDecodedEntry({ src: masterAudioSrc, track: t }); })
       .catch(() => { });
     return () => { alive = false; };
-  }, [activeStemSrc]);
-  const decoded = decodedEntry?.src === activeStemSrc ? decodedEntry.track : null;
+  }, [masterAudioSrc]);
+  const decoded = decodedEntry?.src === masterAudioSrc ? decodedEntry.track : null;
   const getPlayheadTime = useCallback(
     () => stemAudiosRef.current[activeTrack]?.currentTime || 0,
     [activeTrack],
@@ -502,10 +548,10 @@ export default function StudioView({
     return out;
   }, [ringAnalyser, getPlayheadTime]);
 
-  // Auto-preload all stem audio elements in parallel as soon as job completes
+  // Auto-preload active stem audio elements in parallel as soon as job completes
   useEffect(() => {
     if (currentJob?.id && currentResults) {
-      STEM_KEYS.forEach(k => {
+      activeStemKeys.forEach(k => {
         const el = stemAudiosRef.current[k];
         if (el) {
           const expectedSrc = getStemSource(k);
@@ -517,9 +563,9 @@ export default function StudioView({
         }
       });
     }
-  }, [currentJob?.id, currentResults, cacheBuster]);
+  }, [currentJob?.id, currentResults, cacheBuster, activeStemKeys]);
 
-  // Seamless 0ms latency stem switching without stopping playback or losing timestamp
+  // Instant 0ms latency stem switching without thread freezing, audio decoding lag or losing timestamp
   const selectTrack = (trackId) => {
     if (trackId === activeTrack) return;
     const oldAudio = stemAudiosRef.current[activeTrack];
@@ -528,13 +574,14 @@ export default function StudioView({
     const wasPlay = isPlaying || (oldAudio && !oldAudio.paused && !oldAudio.ended);
     const exactTime = oldAudio ? oldAudio.currentTime : currentTime;
 
-    setActiveTrack(trackId);
-
-    // Mute previously active stem instantly
+    // Immediately pause old audio to free decoder and network bandwidth
     if (oldAudio) {
-      oldAudio.muted = true;
-      oldAudio.volume = 0;
+      try {
+        oldAudio.pause();
+      } catch (e) { }
     }
+
+    setActiveTrack(trackId);
 
     if (newAudio) {
       audioRef.current = newAudio;
@@ -558,10 +605,12 @@ export default function StudioView({
     if (!activeEl) return;
 
     if (isPlaying || (!activeEl.paused && !activeEl.ended)) {
-      // Pause all stems synchronously
-      STEM_KEYS.forEach(k => {
+      // Pause active and all stems cleanly
+      activeStemKeys.forEach(k => {
         const el = stemAudiosRef.current[k];
-        if (el) el.pause();
+        if (el) {
+          try { el.pause(); } catch (e) { }
+        }
       });
       setIsPlaying(false);
       setIsAudioLoading(false);
@@ -576,24 +625,12 @@ export default function StudioView({
           activeEl.load();
         }
 
-        // Synchronize and play all stems together in lockstep
-        STEM_KEYS.forEach(k => {
-          const el = stemAudiosRef.current[k];
-          if (el) {
-            if (k === activeTrack) {
-              el.muted = isMuted;
-              el.volume = isMuted ? 0 : volume;
-            } else {
-              el.muted = true;
-              el.volume = 0;
-            }
-            if (Math.abs(el.currentTime - curTime) > 0.05) {
-              try { el.currentTime = curTime; } catch (e) { }
-            }
-            el.play().catch(() => { });
-          }
-        });
-
+        activeEl.muted = isMuted;
+        activeEl.volume = isMuted ? 0 : volume;
+        if (Math.abs((activeEl.currentTime || 0) - curTime) > 0.05) {
+          try { activeEl.currentTime = curTime; } catch (e) { }
+        }
+        await activeEl.play();
         setIsPlaying(true);
       } catch (err) {
         if (err.name !== 'AbortError') {
@@ -613,17 +650,6 @@ export default function StudioView({
     if (e.target.duration && !isNaN(e.target.duration) && e.target.duration > 0) {
       setDuration(e.target.duration);
     }
-    // Micro-drift correction across stems (aligns if drift exceeds 0.08s)
-    if (isPlaying) {
-      STEM_KEYS.forEach(k => {
-        if (k !== activeTrack) {
-          const el = stemAudiosRef.current[k];
-          if (el && Math.abs(el.currentTime - cur) > 0.08) {
-            try { el.currentTime = cur; } catch (err) { }
-          }
-        }
-      });
-    }
   };
 
   // Scrubber drag handlers
@@ -640,28 +666,23 @@ export default function StudioView({
   const handleSeekEnd = (e) => {
     const val = parseFloat(e.target.value);
     if (!isNaN(val)) {
-      STEM_KEYS.forEach(k => {
-        const el = stemAudiosRef.current[k];
-        if (el) {
-          try { el.currentTime = val; } catch (err) { }
-        }
-      });
+      const activeEl = stemAudiosRef.current[activeTrack] || audioRef.current;
+      if (activeEl) {
+        try { activeEl.currentTime = val; } catch (err) { }
+      }
     }
     setCurrentTime(val);
     setIsSeeking(false);
   };
 
-  // Skip forward or backward by seconds across all stems
+  // Skip forward or backward by seconds
   const skipTime = (seconds) => {
     const activeEl = stemAudiosRef.current[activeTrack] || audioRef.current;
     const maxD = duration > 0 ? duration : (currentResults?.duration || 180);
     const target = Math.max(0, Math.min(maxD, ((activeEl ? activeEl.currentTime : currentTime) || 0) + seconds));
-    STEM_KEYS.forEach(k => {
-      const el = stemAudiosRef.current[k];
-      if (el) {
-        try { el.currentTime = target; } catch (err) { }
-      }
-    });
+    if (activeEl) {
+      try { activeEl.currentTime = target; } catch (err) { }
+    }
     setCurrentTime(target);
   };
 
@@ -671,12 +692,10 @@ export default function StudioView({
     const maxD = duration > 0 ? duration : (currentResults?.duration || 180);
     if (maxD) {
       const target = pos * maxD;
-      STEM_KEYS.forEach(k => {
-        const el = stemAudiosRef.current[k];
-        if (el) {
-          try { el.currentTime = target; } catch (err) { }
-        }
-      });
+      const activeEl = stemAudiosRef.current[activeTrack] || audioRef.current;
+      if (activeEl) {
+        try { activeEl.currentTime = target; } catch (err) { }
+      }
       setCurrentTime(target);
     }
   };
@@ -981,7 +1000,7 @@ export default function StudioView({
   const maxDuration = duration > 0 ? duration : (currentResults?.duration || 180);
   const playhead = isSeeking ? seekTime : currentTime;
   const playPct = maxDuration > 0 ? Math.min(1, Math.max(0, playhead / maxDuration)) : 0;
-  const activeStem = STEMS.find((st) => st.id === activeTrack) || STEMS[0];
+  const activeStem = availableStems.find((st) => st.id === activeTrack) || availableStems[0] || STEMS[0];
   const ringSinger = SINGERS.find((sg) => singerName.toLowerCase().includes(sg.name.toLowerCase().split(' ')[0].toLowerCase()));
   const ringColor = hexToRgb(ringSinger?.color || '#a78bfa');
   const ringInitials = ringSinger?.initials || (selectedModel === 'raw' ? 'You' : singerName.slice(0, 2).toUpperCase());
@@ -990,8 +1009,8 @@ export default function StudioView({
   return (
     <div className="flex h-screen w-full bg-[#07080a] text-white overflow-hidden font-sans select-none">
 
-      {/* HTML5 Synchronized Multi-Stem Audio Elements Engine */}
-      {STEM_KEYS.map((stemKey) => (
+      {/* HTML5 Audio Engine for Available Stems */}
+      {activeStemKeys.map((stemKey) => (
         <audio
           key={stemKey}
           ref={(el) => {
@@ -1071,7 +1090,7 @@ export default function StudioView({
             <div className="px-3 pb-1 eyebrow !text-[10px] text-white/30">Workspace</div>
             {[
               { id: 'studio', label: 'Studio', icon: Compass },
-              { id: 'my-songs', label: 'My Songs', icon: Music2, count: recentJobs.length },
+              { id: 'my-songs', label: 'My Songs', icon: Music2, count: cloudSavedJobs.length },
             ].map(({ id, label, icon: Icon, count }) => {
               const on = activeTab === id;
               return (
@@ -1172,16 +1191,16 @@ export default function StudioView({
                     My <span className="font-accent text-[#e5a958]">songs</span>
                   </h3>
                 </div>
-                <span className="chip chip-gold">{recentJobs.length} {recentJobs.length === 1 ? 'track' : 'tracks'}</span>
+                <span className="chip chip-gold">{cloudSavedJobs.length} {cloudSavedJobs.length === 1 ? 'track' : 'tracks'}</span>
               </div>
 
-              {recentJobs.length === 0 ? (
+              {cloudSavedJobs.length === 0 ? (
                 <div className="panel p-14 text-center my-auto">
                   <div className="vinyl w-20 h-20 mx-auto is-playing">
                     <div className="vinyl-label bg-gradient-to-br from-[#e5a958] to-[#3fe0c5]" />
                   </div>
-                  <p className="mt-6 text-lg font-semibold text-white">No songs yet</p>
-                  <p className="mt-1 text-sm text-white/50 max-w-sm mx-auto">Your first render with Arijit Singh, Sonu Nigam, KK or your own voice will show up here.</p>
+                  <p className="mt-6 text-lg font-semibold text-white">No saved cloud songs yet</p>
+                  <p className="mt-1 text-sm text-white/50 max-w-sm mx-auto">Songs saved to Cloudflare R2 will appear here automatically. Master 3D tracks are preserved in cloud storage.</p>
                   <button type="button" onClick={requestStartNewSong} className="btn btn-primary mt-6">
                     <PlusCircle /> Create a song
                   </button>
@@ -1196,7 +1215,7 @@ export default function StudioView({
                   </div>
 
                   <div className="divide-y divide-white/[0.05] overflow-y-auto flex-1">
-                    {recentJobs.map((j, idx) => {
+                    {cloudSavedJobs.map((j, idx) => {
                       const r = j.results || {};
                       const s = r.singer || j.metadata?.singer_name || 'Arijit Singh';
                       const isSelected = (currentJob?.id === j.id);
@@ -1234,8 +1253,8 @@ export default function StudioView({
                               <div className="flex items-center gap-2 text-[11px] text-white/45 font-mono">
                                 <span>{formatTime(r.duration || 180)}</span>
                                 <span className="text-white/20">·</span>
-                                <span>4 stems</span>
-                                {isSelected && <><span className="text-white/20">·</span><span className="text-[#e5a958]">loaded</span></>}
+                                <span className="text-[#e5a958] flex items-center gap-1"><Cloud className="w-3 h-3 inline" /> Master 3D</span>
+                                {isSelected && <><span className="text-white/20">·</span><span className="text-[#3fe0c5]">playing</span></>}
                               </div>
                             </div>
                           </div>
@@ -1459,20 +1478,27 @@ export default function StudioView({
 
                   {/* Transport + stems */}
                   <div className="flex flex-col xl:flex-row items-center justify-between gap-3 flex-shrink-0">
-                    <div className="seg max-w-full overflow-x-auto">
-                      {STEMS.map((stem) => (
-                        <button
-                          key={stem.id}
-                          type="button"
-                          onClick={() => selectTrack(stem.id)}
-                          title={stem.hint}
-                          className="seg-item"
-                          data-active={activeTrack === stem.id}
-                          data-tone="gold"
-                        >
-                          {stem.id === 'vocal_arijit' ? `${singerName.split(' ')[0]} solo` : stem.label}
-                        </button>
-                      ))}
+                    <div className="flex items-center gap-2 max-w-full overflow-x-auto">
+                      <div className="seg max-w-full overflow-x-auto">
+                        {availableStems.map((stem) => (
+                          <button
+                            key={stem.id}
+                            type="button"
+                            onClick={() => selectTrack(stem.id)}
+                            title={stem.hint}
+                            className="seg-item"
+                            data-active={activeTrack === stem.id}
+                            data-tone="gold"
+                          >
+                            {stem.id === 'vocal_arijit' ? `${singerName.split(' ')[0]} solo` : stem.label}
+                          </button>
+                        ))}
+                      </div>
+                      {isCloudOnly && (
+                        <span className="chip chip-gold !h-8 !text-[11px] gap-1.5 shrink-0" title="Only Master 3D is saved in Cloudflare R2 cloud storage">
+                          <Cloud className="w-3.5 h-3.5 text-[#e5a958]" /> Cloudflare R2 Master
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-3">
@@ -2045,8 +2071,8 @@ export default function StudioView({
             </div>
 
             <ul className="relative panel-inset p-3.5 space-y-2 text-xs text-white/65">
-              <li className="flex gap-2"><span className="w-1.5 h-1.5 rounded-full bg-[#e5a958] mt-1.5 shrink-0" /> Only the Master 3D mix (~2.8 MB) is uploaded to cloud storage.</li>
-              <li className="flex gap-2"><span className="w-1.5 h-1.5 rounded-full bg-[#3fe0c5] mt-1.5 shrink-0" /> Clean Natural and stems stay local — you can re-create Clean Natural any time.</li>
+              <li className="flex gap-2"><span className="w-1.5 h-1.5 rounded-full bg-[#e5a958] mt-1.5 shrink-0" /> Master 3D is uploaded directly to Cloudflare R2 cloud storage.</li>
+              <li className="flex gap-2"><span className="w-1.5 h-1.5 rounded-full bg-[#3fe0c5] mt-1.5 shrink-0" /> Unsaved songs are removed immediately to keep your Mac disk free.</li>
             </ul>
 
             <div className="relative space-y-2">
