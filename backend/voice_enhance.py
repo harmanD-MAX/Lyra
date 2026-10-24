@@ -23,16 +23,32 @@ FRAME_PERIOD_MS = 5.0
 def analyse_f0(y: np.ndarray, sr: int) -> np.ndarray:
     try:
         import pyworld as pw
-        x = y.astype(np.float64)
-        f0, t = pw.harvest(x, sr, f0_floor=60.0, f0_ceil=1100.0, frame_period=FRAME_PERIOD_MS)
-        return pw.stonemask(x, f0, t, sr)
-    except Exception as e:
-        logger.debug(f"pyworld harvest unavailable ({e}), using Parselmouth pitch analysis")
-        import parselmouth
         mono = y.astype(np.float64) if y.ndim == 1 else y.mean(axis=1 if y.ndim > 1 else 0).astype(np.float64)
-        snd = parselmouth.Sound(mono, sr)
-        pitch = snd.to_pitch(time_step=FRAME_PERIOD_MS / 1000.0, pitch_floor=60.0, pitch_ceiling=1100.0)
-        return pitch.selected_array["frequency"].astype(np.float64)
+        # Downsample to 16kHz for harvest to avoid multi-gigabyte C memory allocation spikes on Colab/Linux
+        if sr > 16000:
+            import librosa
+            mono_16k = librosa.resample(mono.astype(np.float32), orig_sr=sr, target_sr=16000).astype(np.float64)
+            f0, t = pw.harvest(mono_16k, 16000, f0_floor=60.0, f0_ceil=1100.0, frame_period=FRAME_PERIOD_MS)
+            return pw.stonemask(mono_16k, f0, t, 16000)
+        else:
+            f0, t = pw.harvest(mono, sr, f0_floor=60.0, f0_ceil=1100.0, frame_period=FRAME_PERIOD_MS)
+            return pw.stonemask(mono, f0, t, sr)
+    except Exception as e:
+        logger.debug(f"pyworld harvest unavailable ({e}), using fallback pitch analysis")
+        try:
+            import parselmouth
+            mono = y.astype(np.float64) if y.ndim == 1 else y.mean(axis=1 if y.ndim > 1 else 0).astype(np.float64)
+            snd = parselmouth.Sound(mono, sr)
+            pitch = snd.to_pitch(time_step=FRAME_PERIOD_MS / 1000.0, pitch_floor=60.0, pitch_ceiling=1100.0)
+            return pitch.selected_array["frequency"].astype(np.float64)
+        except Exception:
+            try:
+                import librosa
+                mono = y.astype(np.float32) if y.ndim == 1 else y.mean(axis=1 if y.ndim > 1 else 0).astype(np.float32)
+                f0 = librosa.yin(mono, fmin=60.0, fmax=1100.0, sr=sr, hop_length=int(sr * FRAME_PERIOD_MS / 1000.0))
+                return np.nan_to_num(f0).astype(np.float64)
+            except Exception:
+                return np.zeros(max(1, int(len(y) / (sr * FRAME_PERIOD_MS / 1000.0))), dtype=np.float64)
 
 
 def retune_world(
