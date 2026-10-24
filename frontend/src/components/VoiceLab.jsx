@@ -209,7 +209,7 @@ export default function VoiceLab({ open, onClose, voices, onVoicesChanged }) {
 
   useEffect(() => {
     if (!open || !training) return undefined;
-    const id = setInterval(onVoicesChanged, 4000);
+    const id = setInterval(onVoicesChanged, 1500);
     return () => clearInterval(id);
   }, [open, training, onVoicesChanged]);
 
@@ -220,7 +220,6 @@ export default function VoiceLab({ open, onClose, voices, onVoicesChanged }) {
 
   if (!open) return null;
 
-  const chosen = PRESETS.find((p) => p.id === preset);
   const recordings = source === 'record' ? takes.map((t) => t.file) : files;
   const minutes = source === 'record' ? takes.reduce((a, t) => a + t.seconds, 0) / 60 : null;
 
@@ -231,7 +230,7 @@ export default function VoiceLab({ open, onClose, voices, onVoicesChanged }) {
     try {
       const fd = new FormData();
       fd.append('name', name || 'My Voice');
-      fd.append('preset', preset);
+      fd.append('preset', 'auto');
       recordings.forEach((f) => fd.append('recordings', f));
       const res = await fetch('/api/voices/train', { method: 'POST', body: fd });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Training request failed');
@@ -350,42 +349,34 @@ export default function VoiceLab({ open, onClose, voices, onVoicesChanged }) {
             )}
             <p className="text-[11px] text-white/45 flex gap-1.5"><Info className="w-3.5 h-3.5 shrink-0 mt-0.5" /> Quiet room, same distance from the mic, no music playing, headphones off your ears.</p>
 
-            {/* Presets with explanations */}
-            <div>
-              <div className="text-sm font-semibold text-white/85 mb-2">Training quality</div>
-              <div className="grid sm:grid-cols-3 gap-2">
-                {PRESETS.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => setPreset(p.id)}
-                    className={`text-left rounded-xl border p-3.5 cursor-pointer transition ${preset === p.id ? 'border-[#e5a958] bg-[#e5a958]/10' : 'border-white/10 hover:border-white/25'}`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-sm">{p.label}</span>
-                      {p.id === 'standard' && <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#3fe0c5]/15 text-[#3fe0c5]">Recommended</span>}
-                    </div>
-                    <div className="text-[11px] text-white/50 mt-0.5">{p.tagline}</div>
-                    <div className="mt-2 space-y-0.5 text-[11px] text-white/65">
-                      <div>🎙 {p.record}</div>
-                      <div>⏱ {p.time}</div>
-                    </div>
-                  </button>
-                ))}
+            {/* Smart Auto Adaptive Training */}
+            <div className="rounded-2xl border border-[#3fe0c5]/25 bg-[#3fe0c5]/[0.06] p-4 text-xs text-white/75 leading-relaxed">
+              <div className="flex items-center gap-2 text-[#3fe0c5] font-semibold text-sm mb-1.5">
+                <Sparkles className="w-4 h-4" /> Smart Auto-Tuned Training (Fastest)
               </div>
-              <div className="mt-3 rounded-xl border border-[#3fe0c5]/20 bg-[#3fe0c5]/[0.05] p-3.5 text-xs text-white/70 leading-relaxed">
-                <div className="flex items-center gap-1.5 text-[#3fe0c5] font-semibold mb-1"><Sparkles className="w-3.5 h-3.5" /> {chosen.label}: what you get</div>
-                {chosen.note}
-                <div className="mt-1.5 font-mono text-[10px] text-white/45">{chosen.detail}</div>
-                <div className="mt-2 text-white/55">Every preset also makes a voice sample from your recordings, so the Seed-VC singing engine can sing as you too.</div>
-                {minutes !== null && minutes > 0 && (
-                  <div className="mt-2 text-white/80">You've recorded <b>{minutes.toFixed(1)} min</b> — {minutes >= 15 ? 'enough for any preset.' : minutes >= 8 ? 'great for Quick or Standard.' : minutes >= 3 ? 'enough for Quick; record more for Standard.' : 'record a few more minutes for good results.'}</div>
-                )}
+              <p className="text-white/60 leading-relaxed">
+                Automatically tunes training steps to your audio duration for maximum likeness in minutes with zero overheating.
+              </p>
+              {minutes !== null && minutes > 0 ? (
+                <div className="mt-3 p-2.5 rounded-xl bg-black/30 border border-white/10 text-white/90 text-xs flex items-center justify-between">
+                  <span>Recorded audio: <b>{minutes.toFixed(1)} min</b></span>
+                  <span className="text-[#3fe0c5] font-semibold">
+                    {minutes <= 1.5 ? '⚡ ~2.5 mins (180 steps)' : minutes <= 3.5 ? '⚡ ~3.5 mins (240 steps)' : minutes <= 7 ? '⚡ ~4.5 mins (320 steps)' : '⚡ ~6 mins (450 steps)'}
+                  </span>
+                </div>
+              ) : files.length > 0 ? (
+                <div className="mt-3 p-2.5 rounded-xl bg-black/30 border border-white/10 text-white/90 text-xs flex items-center justify-between">
+                  <span>Selected files: <b>{files.length}</b></span>
+                  <span className="text-[#3fe0c5] font-semibold">⚡ Auto-calculated on start</span>
+                </div>
+              ) : null}
+              <div className="mt-2.5 text-[11px] text-white/50">
+                Both RVC v2 and Seed-VC engines are built automatically for your voice.
               </div>
             </div>
 
-            <button type="button" disabled={busy || training} onClick={train} className="w-full rounded-full bg-[#e5a958] text-black font-semibold py-3 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#f0bb6e] transition">
-              {training ? 'A voice is training…' : busy ? 'Uploading…' : `Train with ${chosen.label}`}
+            <button type="button" disabled={busy || training} onClick={train} className="w-full rounded-full bg-[#e5a958] text-black font-semibold py-3.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#f0bb6e] transition">
+              {training ? 'A voice is training…' : busy ? 'Uploading…' : 'Start Fast Voice Training'}
             </button>
           </section>
 

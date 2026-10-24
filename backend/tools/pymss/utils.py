@@ -41,23 +41,18 @@ def get_model_from_config(model_type, config_path, model_kwargs_override=None):
 
 
 def clear_mlx_cache():
-    """Clear MLX memory caches when the MLX backend is available.
-
-    Args:
-        None: This callable does not accept user-provided arguments.
-
-    Returns:
-        None: This callable completes for its side effects."""
+    """Clear MLX memory caches when the MLX backend is available."""
+    import gc
+    gc.collect()
     try:
         import mlx.core as mx
+        if hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
+            mx.metal.clear_cache()
+        clear_cache = getattr(mx, "clear_cache", None)
+        if clear_cache is not None:
+            clear_cache()
     except Exception:
-        return
-
-    clear_cache = getattr(mx, "clear_cache", None)
-    if clear_cache is None:
-        clear_cache = getattr(getattr(mx, "metal", None), "clear_cache", None)
-    if clear_cache is not None:
-        clear_cache()
+        pass
 
 
 def _getWindowingArray(window_size, fade_size):

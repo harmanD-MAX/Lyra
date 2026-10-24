@@ -20,6 +20,21 @@ logger = logging.getLogger(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MIN_FREE_GB = float(os.environ.get("LYRA_MIN_FREE_GB", "3"))
 
+# Guard Apple Silicon unified memory against swap explosion:
+# Disables MPS over-allocation and enables immediate buffer reclamation back to macOS
+if "PYTORCH_MPS_HIGH_WATERMARK_RATIO" not in os.environ:
+    os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
+
+try:
+    import mlx.core as mx
+    # Release inactive Metal buffers back to macOS immediately
+    if hasattr(mx, "set_cache_limit"):
+        mx.set_cache_limit(0)
+    elif hasattr(mx.metal, "set_cache_limit"):
+        mx.metal.set_cache_limit(0)
+except Exception:
+    pass
+
 
 def free_gb(path: str = BASE_DIR) -> float:
     try:
@@ -65,6 +80,10 @@ SEPARATION_MODELS = {
 
 def cpu_threads() -> int:
     cores = os.cpu_count() or 4
+    # On <=8GB RAM Macs, limit PyTorch to 2 threads to prevent 100% CPU saturation
+    # and thermal throttling, keeping performance cores free for the browser & IDE.
+    if ram_gb() <= 9.0:
+        return max(1, min(2, cores // 2))
     return max(1, cores // 2) if LITE else max(1, cores - 1)
 
 
@@ -77,7 +96,7 @@ def apply_worker_limits():
         pass
     if LITE:
         try:
-            os.nice(10)  # let the editor and browser win when the CPU is busy
+            os.nice(15)  # give browser and IDE high priority
         except Exception:
             pass
 

@@ -15,8 +15,11 @@ export default function ProcessingStatus({ job, selectedModel, onReset }) {
     ''
   ).toLowerCase();
 
+  const isPersonal = modelKey.startsWith('my_') || modelKey.includes('voice') || job.metadata?.mode === 'my_voice';
   const singerName = job.results?.singer || job.metadata?.singer_name || (
-    modelKey.includes('kk') 
+    isPersonal
+      ? 'My Voice'
+      : modelKey.includes('kk') 
       ? 'KK' 
       : modelKey.includes('sonu') 
       ? 'Sonu Nigam' 

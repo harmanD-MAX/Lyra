@@ -23,7 +23,8 @@ REQ="$DEST/requirements.txt"
 if [ "$(uname)" = "Darwin" ] && [ -f "$DEST/requirements-mac.txt" ]; then
   REQ="$DEST/requirements-mac.txt"
 fi
-python -m pip install -r "$REQ"
+PYTHON="${PYTHON:-python3}"
+"$PYTHON" -m pip install -r "$REQ"
 
 echo
 echo "Seed-VC installed at $DEST"

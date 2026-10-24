@@ -141,6 +141,13 @@ def extract_features(clips: List[np.ndarray], progress: Callable[[float], None] 
         })
         progress((i + 1) / len(clips))
     del hubert, rmvpe
+    if torch.backends.mps.is_available():
+        try:
+            torch.mps.empty_cache()
+        except Exception:
+            pass
+    import gc
+    gc.collect()
     return items
 
 
@@ -244,11 +251,21 @@ def build_models(cfg: dict, device, use_pretrained: bool = True):
     return net_g, net_d
 
 
-def train(items: List[dict], steps: int = 2000, batch_size: int = 4, use_pretrained: bool = True,
+def train(items: List[dict], steps: int = 2000, batch_size: Optional[int] = None, use_pretrained: bool = True,
           progress: Callable[[float, dict], None] = lambda p, info: None, seed: int = 1234,
           sample_rate: int = SR):
+    import gc
     import torch
+    import resources
     from infer.module import commons
+
+    if batch_size is None:
+        if resources.ram_gb() <= 9.0:
+            batch_size = 1  # 8GB RAM Mac: keep peak training memory under 1.5 GB
+        elif resources.LITE:
+            batch_size = 2
+        else:
+            batch_size = 4
 
     random.seed(seed)
     torch.manual_seed(seed)
@@ -305,6 +322,7 @@ def train(items: List[dict], steps: int = 2000, batch_size: int = 4, use_pretrai
         loss_d.backward()
         commons.clip_grad_value_(net_d.parameters(), None)
         optim_d.step()
+        del y_d_r, y_d_g
 
         # Generator
         y_d_r, y_d_g, fmap_r, fmap_g = net_d(y, y_hat)
@@ -318,15 +336,45 @@ def train(items: List[dict], steps: int = 2000, batch_size: int = 4, use_pretrai
         commons.clip_grad_value_(net_g.parameters(), None)
         optim_g.step()
 
+        # Immediately free autograd graph tensors to keep MPS memory low
+        del y_d_r, y_d_g, fmap_r, fmap_g, y_hat, y
+
         if step % 50 == 0:
             sched_g.step()
             sched_d.step()
-        if step % 10 == 0 or step == steps:
+        if step % 2 == 0 or step == steps:
             info = {
-                "step": step, "loss_mel": float(loss_mel), "loss_g": float(loss_g), "loss_d": float(loss_d),
+                "step": step, "loss_mel": float(loss_mel.detach()), "loss_g": float(loss_g.detach()), "loss_d": float(loss_d.detach()),
                 "elapsed": time.time() - started,
             }
             progress(step / steps, info)
+
+        # Periodic cleanup of intermediate MPS/CUDA buffers prevents memory growth
+        if step % 10 == 0:
+            if device.type == "mps":
+                try:
+                    torch.mps.empty_cache()
+                except Exception:
+                    pass
+            elif device.type == "cuda":
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+            gc.collect()
+
+        # Thermal protection: yield slightly on small machines to keep temperatures down
+        # and ensure browser/IDE remain responsive with zero stutter
+        if resources.LITE and step % 4 == 0:
+            time.sleep(0.005)
+
+    del net_d, optim_g, optim_d, mel
+    if device.type == "mps":
+        try:
+            torch.mps.empty_cache()
+        except Exception:
+            pass
+    gc.collect()
 
     return net_g, cfg
 
@@ -394,6 +442,17 @@ def train_personal_voice(voice_id: str, audio_paths: List[str], steps: Optional[
         cfg_preset["steps"] = int(steps)
     sr = cfg_preset["sample_rate"]
 
+    def auto_steps(total_sec: float) -> int:
+        mins = total_sec / 60.0
+        if mins <= 1.5:
+            return 180  # ~2.5 mins
+        elif mins <= 3.5:
+            return 240  # ~3.5 mins
+        elif mins <= 7.0:
+            return 320  # ~4.5 mins
+        else:
+            return 450  # ~6-7 mins max
+
     def report(pct: float, msg: str):
         voices.update_meta(voice_id, progress=int(pct), message=msg, status="training")
         if progress_cb:
@@ -405,11 +464,20 @@ def train_personal_voice(voice_id: str, audio_paths: List[str], steps: Optional[
     try:
         report(2, "Cleaning and slicing your recordings...")
         clips = preprocess(audio_paths, sr=sr)
+        total_sec = sum(len(c) for c in clips) / sr
+        if not steps or preset in ("auto", "standard"):
+            cfg_preset["steps"] = auto_steps(total_sec)
+            logger.info(f"Auto-set {cfg_preset['steps']} training steps for {total_sec / 60:.1f} min of audio")
         report(5, "Building your Seed-VC reference clip...")
         engines.build_reference(audio_paths, engines.reference_path(model_info))
         report(8, f"Analysing {len(clips)} clips (voice features + pitch)...")
         items = extract_features(clips, progress=lambda p: report(8 + 15 * p, "Analysing your voice..."), sr=sr)
-        rvc_span = 70 if cfg_preset["seedvc_steps"] and engines.seedvc_available() else 72
+        import audio_processor
+        import resources
+        audio_processor.clear_memory()
+
+        can_seedvc = bool(cfg_preset["seedvc_steps"] and engines.seedvc_available() and not resources.LITE and resources.ram_gb() > 12.0)
+        rvc_span = 70 if can_seedvc else 72
         report(23, f"Training your RVC v2 {sr // 1000} kHz voice model...")
         net_g, cfg = train(
             items, steps=cfg_preset["steps"], sample_rate=sr,
@@ -421,9 +489,10 @@ def train_personal_voice(voice_id: str, audio_paths: List[str], steps: Optional[
         export_checkpoint(net_g, cfg, os.path.join(vdir, "model.pth"), meta.get("name", voice_id))
         build_index(items, os.path.join(vdir, "model.index"))
         del net_g
+        audio_processor.clear_memory()
 
         seedvc_ft = None
-        if cfg_preset["seedvc_steps"] and engines.seedvc_available():
+        if can_seedvc:
             report(78, "Fine-tuning Seed-VC singing model on your voice...")
             clip_dir = os.path.join(vdir, "_clips")
             os.makedirs(clip_dir, exist_ok=True)
@@ -435,9 +504,9 @@ def train_personal_voice(voice_id: str, audio_paths: List[str], steps: Optional[
             seedvc_ft = engines.finetune_seedvc(clip_paths, model_info, steps=cfg_preset["seedvc_steps"])
             import shutil
             shutil.rmtree(clip_dir, ignore_errors=True)
+            audio_processor.clear_memory()
 
         report(97, "Finishing up...")
-        import resources
         if resources.LITE:
             # The model, index and reference are saved; raw takes are no longer needed
             import shutil as _sh
@@ -453,3 +522,9 @@ def train_personal_voice(voice_id: str, audio_paths: List[str], steps: Optional[
         logger.error(f"Voice training failed: {e}", exc_info=True)
         voices.update_meta(voice_id, status="error", message=str(e))
         raise
+    finally:
+        try:
+            import audio_processor
+            audio_processor.clear_memory()
+        except Exception:
+            pass
