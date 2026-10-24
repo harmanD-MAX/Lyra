@@ -825,8 +825,8 @@ export default function StudioView({
 
         <div className="space-y-4">
 
-          {/* Logo & Back to Landing Link with exact 5-bar Lyra waveform */}
-          <div className="flex items-center justify-between px-2 py-1">
+          {/* Logo & Branding with exact 5-bar Lyra waveform */}
+          <div className="flex items-center px-2 py-1">
             <div
               onClick={onBackToLanding}
               className="flex items-center gap-2.5 cursor-pointer select-none group"
@@ -840,15 +840,6 @@ export default function StudioView({
                 Lyra
               </span>
             </div>
-            <button
-              type="button"
-              onClick={requestBackToLanding}
-              className="text-[11px] font-medium text-white/50 hover:text-[#e5a958] flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 transition-all cursor-pointer"
-              title="Return to Landing Page"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back</span>
-            </button>
           </div>
 
           {/* + New Song Button */}
@@ -945,8 +936,8 @@ export default function StudioView({
         <div className="hero-grid absolute inset-0 pointer-events-none" />
         <div className="aurora pointer-events-none absolute -top-48 right-[-15%] w-[900px] h-[560px] opacity-70" />
 
-        {/* Viewport Canvas: 100% Fitted inside Viewport Height */}
-        <div className="flex-1 h-full max-h-screen overflow-hidden px-4 sm:px-6 py-2 sm:py-3 flex flex-col justify-center items-center">
+        {/* Expansive Full-Space Studio Canvas */}
+        <div className="flex-1 h-full max-h-screen overflow-hidden p-3 sm:p-4 lg:p-5 flex flex-col">
 
           {/* =====================================================================
               TAB: MY SONGS (Fixed Viewport Table with Internal Scrollable Rows)
@@ -1117,11 +1108,10 @@ export default function StudioView({
 
 
           {/* =====================================================================
-          {/* =====================================================================
-              TAB: STUDIO WORKSPACE (Fixed Viewport Console)
+              TAB: STUDIO WORKSPACE (Expansive Full Space Console)
              ===================================================================== */}
           {activeTab === 'studio' && (
-            <div className="max-w-5xl w-full mx-auto h-full max-h-full flex flex-col justify-center overflow-hidden animate-fadeIn">
+            <div className="w-full h-full flex flex-col justify-between overflow-hidden animate-fadeIn">
 
               {/* If actively processing: show real-time pipeline status */}
               {isSubmitting && currentJob && (
@@ -1132,7 +1122,7 @@ export default function StudioView({
 
               {/* Studio Master Console */}
               {currentResults && (
-                <div className="studio-glass border border-white/10 rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col justify-between w-full max-w-5xl mx-auto animate-fadeIn relative max-h-full overflow-hidden">
+                <div className="studio-glass border border-white/10 rounded-3xl p-5 sm:p-6 shadow-2xl flex-1 flex flex-col justify-between w-full h-full animate-fadeIn relative overflow-hidden">
 
                   {/* Subtle Top Acoustic Rim Glow */}
                   <div className="absolute top-0 left-1/4 right-1/4 h-[1px] bg-gradient-to-r from-transparent via-[#e5a958]/50 to-transparent" />
@@ -1609,22 +1599,22 @@ export default function StudioView({
                   SONG INGESTION DOCK (Completely Fixed Height - Zero Jumping/Shrinking)
                  ================================================================= */}
               {(!currentResults && !activeJobId) && (
-                <div className="studio-glass border border-white/10 rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col justify-between max-w-4xl w-full mx-auto relative overflow-hidden animate-fadeIn">
+                <div className="studio-glass border border-white/10 rounded-3xl p-5 sm:p-6 lg:p-7 shadow-2xl flex-1 flex flex-col justify-between w-full h-full relative overflow-hidden animate-fadeIn">
 
                   {/* Subtle Top Ambient Rim Glow */}
                   <div className="absolute top-0 left-1/4 right-1/4 h-[1px] bg-gradient-to-r from-transparent via-[#e5a958]/40 to-transparent" />
 
                   {/* Top Bar: Title & Active Model Badge */}
-                  <div className="flex items-center justify-between gap-3 pb-2 border-b border-white/10 flex-shrink-0">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-base sm:text-lg font-bold text-white leading-none" style={{ fontFamily: "var(--font-display)" }}>
+                  <div className="flex items-center justify-between gap-3 pb-3 border-b border-white/10 flex-shrink-0">
+                    <div className="flex items-center gap-2.5">
+                      <h3 className="text-base sm:text-xl font-bold text-white leading-none" style={{ fontFamily: "var(--font-display)" }}>
                         {creationCategory === 'sang_by_me' ? (
                           <>Your <span className="font-accent text-[#e5a958]">Vocal Take</span> & Pitch Engine</>
                         ) : (
                           <>Neural <span className="font-accent text-[#3fe0c5]">AI Song Cover</span> Studio</>
                         )}
                       </h3>
-                      <span className="hidden md:inline-block text-[11px] text-white/40">
+                      <span className="hidden md:inline-block text-xs text-white/50">
                         {creationCategory === 'sang_by_me'
                           ? '• Auto-tune, clean echo, & master voice.'
                           : '• Separate stems & resing lead vocals.'}
@@ -1632,7 +1622,7 @@ export default function StudioView({
                     </div>
 
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      <span className="text-[11px] font-mono text-[#e5a958] px-2.5 py-0.5 rounded-full bg-[#e5a958]/10 border border-[#e5a958]/25 flex items-center gap-1.5">
+                      <span className="text-xs font-mono text-[#e5a958] px-3 py-1 rounded-full bg-[#e5a958]/10 border border-[#e5a958]/25 flex items-center gap-1.5">
                         <span className="w-1.5 h-1.5 rounded-full bg-[#e5a958] animate-pulse" />
                         <span>{singerName} · {selectedEngine === 'seedvc' ? 'Seed-VC 44k' : 'RVC v2 48k'}</span>
                       </span>
@@ -1719,30 +1709,30 @@ export default function StudioView({
                   </div>
 
                   {/* SINGER PERSONA & CONVERSION ENGINE CONSOLE */}
-                  <div className="p-3 rounded-xl bg-white/[0.025] border border-white/10 mb-2.5 space-y-2 flex-shrink-0">
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-white/[0.025] border border-white/10 my-1 space-y-2.5 flex-shrink-0">
                     {/* Row 1: Singer Persona Choice */}
                     <div>
-                      <div className="flex items-center justify-between text-[11px] font-mono text-white/50 mb-1">
+                      <div className="flex items-center justify-between text-xs font-mono text-white/50 mb-1.5">
                         <span className="uppercase tracking-wider font-semibold">1. SELECT SINGER PERSONA</span>
                         <span className="text-[#3fe0c5]">Arijit • Sonu • KK (RVC & Seed-VC Ready)</span>
                       </div>
 
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                         {creationCategory === 'sang_by_me' && (
                           <button
                             type="button"
                             onClick={() => setSelectedModel('raw')}
-                            className={`p-2 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                            className={`p-2.5 sm:p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
                               selectedModel === 'raw'
                                 ? 'bg-[#e5a958]/20 border-[#e5a958] text-white shadow-sm ring-1 ring-[#e5a958]'
                                 : 'bg-white/[0.02] border-white/10 text-white/70 hover:text-white hover:bg-white/5'
                             }`}
                           >
                             <div>
-                              <div className="font-bold text-xs">Keep My Voice</div>
-                              <div className="text-[10px] text-white/50">In Tune • No Model</div>
+                              <div className="font-bold text-xs sm:text-sm">Keep My Voice</div>
+                              <div className="text-[10px] sm:text-xs text-white/50">In Tune • No Model</div>
                             </div>
-                            {selectedModel === 'raw' && <Check className="w-3.5 h-3.5 text-[#e5a958]" />}
+                            {selectedModel === 'raw' && <Check className="w-4 h-4 text-[#e5a958]" />}
                           </button>
                         )}
 
@@ -1755,74 +1745,74 @@ export default function StudioView({
                             key={s.id}
                             type="button"
                             onClick={() => setSelectedModel(s.id)}
-                            className={`p-2 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                            className={`p-2.5 sm:p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
                               selectedModel === s.id
                                 ? 'bg-[#e5a958]/20 border-[#e5a958] text-white shadow-sm ring-1 ring-[#e5a958]'
                                 : 'bg-white/[0.02] border-white/10 text-white/70 hover:text-white hover:bg-white/5'
                             }`}
                           >
                             <div>
-                              <div className="font-bold text-xs">{s.name}</div>
-                              <div className="text-[10px] text-white/50">{s.vibe}</div>
+                              <div className="font-bold text-xs sm:text-sm">{s.name}</div>
+                              <div className="text-[10px] sm:text-xs text-white/50">{s.vibe}</div>
                             </div>
-                            {selectedModel === s.id && <Check className="w-3.5 h-3.5 text-[#e5a958]" />}
+                            {selectedModel === s.id && <Check className="w-4 h-4 text-[#e5a958]" />}
                           </button>
                         ))}
                       </div>
                     </div>
 
                     {/* Row 2: Choose Engine (Left) & Auto-Tune Pitch Fix (Right) */}
-                    <div className="pt-2 border-t border-white/5 grid sm:grid-cols-12 gap-2 items-center">
+                    <div className="pt-2 border-t border-white/5 grid sm:grid-cols-12 gap-2.5 items-center">
                       {/* Dual Engine Switch: 7 cols */}
-                      <div className="sm:col-span-7 flex items-center gap-1.5">
-                        <span className="text-[10px] font-mono uppercase tracking-wider text-white/40 shrink-0 mr-1">Engine:</span>
+                      <div className="sm:col-span-7 flex items-center gap-2">
+                        <span className="text-[11px] font-mono uppercase tracking-wider text-white/40 shrink-0 mr-1">Engine:</span>
                         <button
                           type="button"
                           onClick={() => setSelectedEngine('rvc')}
-                          className={`flex-1 py-1.5 px-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-center justify-between ${
+                          className={`flex-1 py-2 px-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
                             selectedEngine === 'rvc'
                               ? 'bg-[#e5a958]/20 border-[#e5a958] text-white ring-1 ring-[#e5a958]'
                               : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white'
                           }`}
                         >
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-xs text-white">⚡ RVC v2</span>
-                            <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-[#e5a958]/15 text-[#e5a958]">48k Metal</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-xs sm:text-sm text-white">⚡ RVC v2</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#e5a958]/15 text-[#e5a958]">48k Metal</span>
                           </div>
-                          {selectedEngine === 'rvc' && <Check className="w-3 h-3 text-[#e5a958]" />}
+                          {selectedEngine === 'rvc' && <Check className="w-3.5 h-3.5 text-[#e5a958]" />}
                         </button>
 
                         <button
                           type="button"
                           onClick={() => setSelectedEngine('seedvc')}
-                          className={`flex-1 py-1.5 px-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-center justify-between ${
+                          className={`flex-1 py-2 px-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
                             selectedEngine === 'seedvc'
                               ? 'bg-[#3fe0c5]/20 border-[#3fe0c5] text-white ring-1 ring-[#3fe0c5]'
                               : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white'
                           }`}
                         >
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-xs text-white">🌱 Seed-VC</span>
-                            <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-[#3fe0c5]/15 text-[#3fe0c5]">44.1k DiT</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-xs sm:text-sm text-white">🌱 Seed-VC</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#3fe0c5]/15 text-[#3fe0c5]">44.1k DiT</span>
                           </div>
-                          {selectedEngine === 'seedvc' && <Check className="w-3 h-3 text-[#3fe0c5]" />}
+                          {selectedEngine === 'seedvc' && <Check className="w-3.5 h-3.5 text-[#3fe0c5]" />}
                         </button>
                       </div>
 
                       {/* Pitch Fix Checkbox: 5 cols */}
                       <div className="sm:col-span-5">
-                        <label className="flex items-center gap-2 py-1.5 px-2.5 rounded-lg bg-black/40 border border-white/10 hover:border-[#e5a958]/40 transition cursor-pointer select-none">
+                        <label className="flex items-center gap-2 py-2 px-3 rounded-xl bg-black/40 border border-white/10 hover:border-[#e5a958]/40 transition cursor-pointer select-none">
                           <input
                             type="checkbox"
                             checked={fixPitch}
                             onChange={(e) => setFixPitch(e.target.checked)}
-                            className="w-3.5 h-3.5 rounded border-white/20 text-[#e5a958] bg-black/60 cursor-pointer accent-[#e5a958]"
+                            className="w-4 h-4 rounded border-white/20 text-[#e5a958] bg-black/60 cursor-pointer accent-[#e5a958]"
                           />
-                          <span className="text-xs font-semibold text-white truncate">Fix Pitch & Auto-Tune</span>
+                          <span className="text-xs sm:text-sm font-semibold text-white truncate">Fix Pitch & Auto-Tune</span>
                           {fixPitch ? (
-                            <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded-full ml-auto">On</span>
+                            <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full ml-auto">On</span>
                           ) : (
-                            <span className="text-[9px] font-mono text-white/40 bg-white/5 px-1.5 py-0.2 rounded-full ml-auto">Raw</span>
+                            <span className="text-[10px] font-mono text-white/40 bg-white/5 px-2 py-0.5 rounded-full ml-auto">Raw</span>
                           )}
                         </label>
                       </div>
@@ -1830,7 +1820,7 @@ export default function StudioView({
                   </div>
 
                   {/* DOCK CONTENT STAGE: Shared audio preview element for all ingest methods */}
-                  <div className="min-h-[110px] sm:min-h-[125px] h-auto w-full flex flex-col justify-center my-0.5 flex-shrink-0">
+                  <div className="flex-1 min-h-[140px] w-full flex flex-col justify-center my-2">
 
                     {/* Shared preview audio element for listening to recording or uploaded audio */}
                     <audio
@@ -1998,19 +1988,19 @@ export default function StudioView({
                               }
                             }}
                             onClick={() => fileInputRef.current?.click()}
-                            className={`border-2 border-dashed rounded-xl p-3 flex items-center justify-center gap-3 text-center cursor-pointer transition-all duration-300 ${dragActive
+                            className={`border-2 border-dashed rounded-2xl p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-center gap-4 text-center sm:text-left cursor-pointer transition-all duration-300 ${dragActive
                                 ? 'border-[#e5a958] bg-[#e5a958]/10'
                                 : 'border-white/15 hover:border-white/30 bg-white/[0.03] hover:bg-white/[0.05]'
                               }`}
                           >
-                            <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-[#e5a958] shrink-0">
-                              <Upload className="w-4 h-4" />
+                            <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-[#e5a958] shrink-0">
+                              <Upload className="w-6 h-6" />
                             </div>
-                            <div className="text-left">
-                              <div className="text-xs sm:text-sm font-bold text-white">
+                            <div>
+                              <div className="text-sm sm:text-base font-bold text-white">
                                 Drop vocal or song audio file here (or click to browse)
                               </div>
-                              <p className="text-[10px] text-white/50">
+                              <p className="text-xs text-white/50 mt-0.5">
                                 Supports lossless WAV, MP3, FLAC, M4A, OGG up to 100MB with automatic Sur Lock note fixing.
                               </p>
                             </div>
@@ -2271,7 +2261,7 @@ export default function StudioView({
                       type="button"
                       onClick={handleConvertTrigger}
                       disabled={isSubmitting || !hasValidInput}
-                      className={`w-full py-3 sm:py-3.5 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2.5 transition-all shadow-xl ${isSubmitting || !hasValidInput
+                      className={`w-full py-3.5 sm:py-4 rounded-xl font-bold text-sm sm:text-base flex items-center justify-center gap-2.5 transition-all shadow-xl ${isSubmitting || !hasValidInput
                           ? 'bg-white/10 text-white/30 cursor-not-allowed border border-white/5'
                           : 'bg-[#e5a958] hover:bg-[#f0bb6e] text-black cursor-pointer active:scale-[0.99] shadow-[#e5a958]/25'
                         }`}
