@@ -388,7 +388,7 @@ const GUIDE = [
   },
   {
     art: 'mix', title: 'Listen & mix',
-    body: 'Switch between Master 3D, Clean Natural, the solo vocal, instrumental and your original. Open the Acoustic Rack to rebalance.',
+    body: 'Switch between Master 3D, the solo vocal, instrumental and your original. Open the Acoustic Rack to rebalance.',
     where: 'Player → stems · rack',
   },
   {
@@ -558,7 +558,7 @@ export default function LandingPage({ onLaunchStudio }) {
 
             <Reveal delay={400}>
               <div className="mt-10 grid grid-cols-3 gap-4 max-w-md mx-auto lg:mx-0">
-                {[['2', 'singing engines'], ['3', 'legend voices + yours'], ['5', 'stems per render']].map(([n, l]) => (
+                {[['2', 'singing engines'], ['3', 'legend voices + yours'], ['4', 'stems per render']].map(([n, l]) => (
                   <div key={l} className="text-left">
                     <div className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>{n}</div>
                     <div className="text-xs text-white/45">{l}</div>

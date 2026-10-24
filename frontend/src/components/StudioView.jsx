@@ -25,7 +25,6 @@ const SINGERS = [
 
 const STEMS = [
   { id: 'master', label: 'Master 3D', hint: 'Full 3D spatial remaster' },
-  { id: 'master_clean', label: 'Clean Natural', hint: 'Clean mix, no reverb or delay' },
   { id: 'vocal_arijit', label: 'Solo vocal', hint: 'Converted vocal only' },
   { id: 'instrumental', label: 'Instrumental', hint: 'Isolated backing track' },
   { id: 'vocal_original', label: 'Original', hint: 'Your original input vocal' },
@@ -288,7 +287,7 @@ export default function StudioView({
   const stemAudiosRef = useRef({});
   const fileInputRef = useRef(null);
 
-  const STEM_KEYS = ['master', 'master_clean', 'vocal_arijit', 'instrumental', 'vocal_original'];
+  const STEM_KEYS = ['master', 'vocal_arijit', 'instrumental', 'vocal_original'];
 
   // When job completes or changes, auto-load track
   const currentResults = currentJob?.results;
@@ -1235,7 +1234,7 @@ export default function StudioView({
                               <div className="flex items-center gap-2 text-[11px] text-white/45 font-mono">
                                 <span>{formatTime(r.duration || 180)}</span>
                                 <span className="text-white/20">·</span>
-                                <span>5 stems</span>
+                                <span>4 stems</span>
                                 {isSelected && <><span className="text-white/20">·</span><span className="text-[#e5a958]">loaded</span></>}
                               </div>
                             </div>
@@ -1600,14 +1599,6 @@ export default function StudioView({
                         className="btn btn-secondary btn-sm"
                       >
                         <Download className="text-[#e5a958]" /> Master MP3
-                      </a>
-                      <a
-                        href={`/api/audio/${currentJob.id}/master_clean_mp3`}
-                        download={`${currentResults.title || 'Lyra_Song'}_Clean_Natural.mp3`}
-                        className="btn btn-secondary btn-sm"
-                        title="Clean Natural mix without reverb or delay"
-                      >
-                        <Download className="text-[#3fe0c5]" /> Clean MP3
                       </a>
                     </div>
                   </div>
