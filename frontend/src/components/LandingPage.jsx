@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight, AudioWaveform, ChevronDown, Download, FileMusic, Layers, Mic2, Music4,
   Scissors, Sparkles, Wand2, Waves, SlidersHorizontal, Gauge, Compass,
-  Zap, Cpu, CheckCircle2, BarChart3, Play, Info, Check
+  Zap, Cpu, CheckCircle2, BarChart3, Info, Check
 } from 'lucide-react';
 import LyraLogo from './LyraLogo';
 import Glyph3D from './three/Glyph3D';
@@ -398,7 +398,7 @@ const GUIDE = [
   },
 ];
 
-function GuideSection({ onLaunch }) {
+function GuideSection() {
   return (
     <section id="guide" className="relative py-24 sm:py-32 px-4 sm:px-6 overflow-hidden">
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(229,169,88,0.07),transparent_60%)] pointer-events-none" />
@@ -425,14 +425,6 @@ function GuideSection({ onLaunch }) {
           })}
         </div>
 
-        <Reveal delay={200} className="mt-10 flex flex-wrap justify-center gap-3">
-          <button type="button" onClick={() => onLaunch(undefined, { mode: 'my_voice' })} className="btn btn-outline-gold btn-lg">
-            <Mic2 /> Start a vocal take
-          </button>
-          <button type="button" onClick={() => onLaunch(undefined, { mode: 'convert' })} className="btn btn-outline-teal btn-lg">
-            <Sparkles /> Make an AI cover
-          </button>
-        </Reveal>
       </div>
     </section>
   );
@@ -558,12 +550,8 @@ export default function LandingPage({ onLaunchStudio }) {
 
             <Reveal delay={300}>
               <div className="mt-9 flex flex-wrap justify-center lg:justify-start gap-3">
-                <button type="button" onClick={() => launch(undefined, { mode: 'convert' })} className="btn btn-primary btn-lg shine-btn group">
-                  <Sparkles /> Open the studio
-                  <ArrowRight className="transition-transform group-hover:translate-x-1" />
-                </button>
-                <button type="button" onClick={() => document.getElementById('guide')?.scrollIntoView({ behavior: 'smooth' })} className="btn btn-secondary btn-lg">
-                  <Play /> How it works
+                <button type="button" onClick={() => document.getElementById('guide')?.scrollIntoView({ behavior: 'smooth' })} className="btn btn-primary btn-lg group">
+                  See how it works <ChevronDown className="transition-transform group-hover:translate-y-0.5" />
                 </button>
               </div>
             </Reveal>
@@ -597,7 +585,7 @@ export default function LandingPage({ onLaunchStudio }) {
 
       <FeatureRibbon />
 
-      <GuideSection onLaunch={launch} />
+      <GuideSection />
 
       <BenchmarkSection />
 
@@ -634,11 +622,6 @@ export default function LandingPage({ onLaunchStudio }) {
                 </Reveal>
               ))}
             </div>
-            <Reveal delay={400}>
-              <button type="button" onClick={() => launch(undefined, { mode: 'my_voice' })} className="mt-10 btn btn-outline-gold btn-lg">
-                Start singing <ArrowRight />
-              </button>
-            </Reveal>
           </div>
 
           <Reveal delay={200}>
@@ -791,9 +774,6 @@ export default function LandingPage({ onLaunchStudio }) {
             Your song is <span className="font-accent text-[#e5a958]">waiting.</span>
           </h2>
           <p className="mt-4 text-white/60 text-base sm:text-lg">Upload a take, paste a link, or record your voice.</p>
-          <button type="button" onClick={() => launch(undefined, { mode: 'convert' })} className="btn btn-primary btn-lg shine-btn group mt-9">
-            Open the studio <ArrowRight className="transition-transform group-hover:translate-x-1" />
-          </button>
         </Reveal>
       </section>
 

@@ -14,20 +14,18 @@ const gauss = (x, m, s) => Math.exp(-((x - m) ** 2) / (2 * s * s));
 /**
  * Hero visual: a radial "singing" spectrum. Bars around the ring move like a
  * voice (syllables, drifting formants, vibrato) and the ring morphs colour as
- * it cycles through the voices. Click a chip to pick one.
+ * it cycles through the voices. 
  */
 export default function HeroVoiceRing() {
   const canvasRef = useRef(null);
   const [idx, setIdx] = useState(0);
-  const [auto, setAuto] = useState(true);
   const idxRef = useRef(0);
   useEffect(() => { idxRef.current = idx; }, [idx]);
 
   useEffect(() => {
-    if (!auto) return undefined;
     const id = setInterval(() => setIdx((i) => (i + 1) % VOICES.length), 3800);
     return () => clearInterval(id);
-  }, [auto]);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -54,8 +52,8 @@ export default function HeroVoiceRing() {
 
       color = mix(color, VOICES[idxRef.current].color, 0.04);
       const cx = w / 2, cy = h / 2;
-      const R = Math.min(w, h) * 0.3;
-      const maxLen = Math.min(w, h) * 0.17;
+      const R = Math.min(w, h) * 0.25;
+      const maxLen = Math.min(w, h) * 0.13;
 
       // a sung phrase: syllables, slowly drifting formants, vibrato shimmer
       const syll = Math.pow(Math.abs(Math.sin(t * 2.2)), 0.55) * (0.65 + 0.35 * Math.sin(t * 0.63));
@@ -143,7 +141,7 @@ export default function HeroVoiceRing() {
       <div className="relative aspect-square">
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-hidden="true" />
         {/* centre disc */}
-        <div className="absolute inset-[31%] rounded-full grid place-items-center text-center border border-white/10 bg-[radial-gradient(circle_at_35%_30%,rgba(255,255,255,0.08),rgba(10,11,14,0.92)_65%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_20px_60px_-20px_rgba(0,0,0,0.9)] backdrop-blur">
+        <div className="absolute inset-[27%] rounded-full grid place-items-center text-center border border-white/10 bg-[radial-gradient(circle_at_35%_30%,rgba(255,255,255,0.08),rgba(10,11,14,0.92)_65%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_20px_60px_-20px_rgba(0,0,0,0.9)] backdrop-blur">
           <div key={v.id} className="animate-fadeIn px-3">
             <div className="text-[10px] font-mono uppercase tracking-[0.22em] text-white/40">Singing as</div>
             <div className="mt-1.5 text-3xl sm:text-4xl font-bold leading-none" style={{ fontFamily: 'var(--font-display)', color: c }}>{v.initials}</div>
@@ -153,21 +151,6 @@ export default function HeroVoiceRing() {
         </div>
       </div>
 
-      <div className="-mt-2 flex flex-wrap justify-center gap-2">
-        {VOICES.map((x, i) => (
-          <button
-            key={x.id}
-            type="button"
-            onClick={() => { setAuto(false); setIdx(i); }}
-            className="seg-item !h-8 border border-white/10 bg-white/[0.03]"
-            data-active={i === idx}
-            style={i === idx ? { boxShadow: `0 0 0 1px ${rgb(x.color, 0.6)}, 0 8px 24px -10px ${rgb(x.color, 0.9)}` } : undefined}
-          >
-            <span className="w-2 h-2 rounded-full" style={{ background: rgb(x.color) }} />
-            {x.name}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
