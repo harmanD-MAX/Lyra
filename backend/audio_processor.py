@@ -644,6 +644,18 @@ def get_cached_vc(pth_path: str):
 
 def unload_vc_cache():
     global DEMUCS_MODEL
+    for key, vc in list(_VC_CACHE.items()):
+        try:
+            if hasattr(vc, "net_g") and vc.net_g is not None:
+                del vc.net_g
+            if hasattr(vc, "hubert_model") and vc.hubert_model is not None:
+                del vc.hubert_model
+            if hasattr(vc, "pipeline") and vc.pipeline is not None:
+                if hasattr(vc.pipeline, "model_rmvpe"):
+                    del vc.pipeline.model_rmvpe
+                del vc.pipeline
+        except Exception:
+            pass
     _VC_CACHE.clear()
     DEMUCS_MODEL = None
     clear_memory()
@@ -911,7 +923,8 @@ def _enhance_hindi_diction_and_consonants(
         sib_l = signal.sosfilt(sos_sib, vocal[:, 0])
         sib_r = signal.sosfilt(sos_sib, vocal[:, 1])
         sib_env = uniform_filter1d(np.abs(sib_l + sib_r) * 0.5, size=int(sr * 0.008))
-        thresh = np.percentile(sib_env, 92) + 1e-6
+        # Subsample for percentile calculation to avoid memory explosion when sorting 10M samples
+        thresh = np.percentile(sib_env[::20], 92) + 1e-6
         suppression = np.clip((sib_env - thresh) / (thresh * 1.5), 0.0, 0.40)
         vocal[:, 0] -= sib_l * suppression
         vocal[:, 1] -= sib_r * suppression
@@ -1153,9 +1166,9 @@ def master_and_remaster_track(
     if progress_cb:
         progress_cb(89, "Engineering 3D Dolby soundstage: vocal focus, chest warmth & word spatialization...")
 
-    # Load audio files
-    vocal, sr_v = sf.read(vocal_wav)
-    inst, sr_i = sf.read(inst_wav) if (inst_wav and os.path.exists(inst_wav)) else (None, 44100)
+    # Load audio files as float32 to conserve 50% memory
+    vocal, sr_v = sf.read(vocal_wav, dtype='float32')
+    inst, sr_i = sf.read(inst_wav, dtype='float32') if (inst_wav and os.path.exists(inst_wav)) else (None, 44100)
 
     # Standardize sample rates and channels to 44.1kHz studio master
     target_sr = 44100
@@ -1173,13 +1186,15 @@ def master_and_remaster_track(
         else:
             inst = librosa.resample(inst.T.astype(np.float32), orig_sr=sr_i, target_sr=target_sr).T
 
-    # Convert vocal to stereo float64
+    # Convert vocal to stereo float32
     if vocal.ndim == 1:
-        vocal = np.column_stack([vocal, vocal])
+        vocal = np.column_stack([vocal, vocal]).astype(np.float32)
     elif vocal.ndim == 2 and vocal.shape[1] == 1:
-        vocal = np.column_stack([vocal[:, 0], vocal[:, 0]])
+        vocal = np.column_stack([vocal[:, 0], vocal[:, 0]]).astype(np.float32)
     elif vocal.shape[1] > 2:
-        vocal = vocal[:, :2]
+        vocal = vocal[:, :2].astype(np.float32)
+    else:
+        vocal = vocal.astype(np.float32)
 
     # Clean vocal: High-pass at 80Hz to eliminate subsonic rumble
     sos_hp = signal.butter(4, 80, 'hp', fs=target_sr, output='sos')
@@ -1412,11 +1427,17 @@ def _apply_dolby_3d_spatial_and_hall_goonj(
 
     # --- 2. GRAND HALL ORCHESTRA GOONJ (भव्य कॉन्सर्ट हॉल और सिम्फनी ऑर्केस्ट्रा की गूँज - FURTHER 30% REDUCTION) ---
     if reverb_amount > 0.01:
-        ir = _get_or_create_hall_ir(sr=sr, duration=2.4)
-        if ir is not None and len(ir) > 0:
-            hall_l = signal.fftconvolve(vocal[:, 0], ir[:, 0], mode='full')[:n_samples]
-            hall_r = signal.fftconvolve(vocal[:, 1], ir[:, 1], mode='full')[:n_samples]
-            hall_goonj = np.column_stack([hall_l, hall_r]).astype(np.float32)
+        hall_goonj = np.zeros_like(vocal, dtype=np.float32)
+        try:
+            ir = _get_or_create_hall_ir(sr=sr, duration=2.4)
+            if ir is not None and len(ir) > 0:
+                hall_l = signal.fftconvolve(vocal[:, 0].astype(np.float32), ir[:, 0].astype(np.float32), mode='full')[:n_samples]
+                hall_r = signal.fftconvolve(vocal[:, 1].astype(np.float32), ir[:, 1].astype(np.float32), mode='full')[:n_samples]
+                hall_goonj[:, 0] = hall_l
+                hall_goonj[:, 1] = hall_r
+                del hall_l, hall_r
+        except (MemoryError, Exception) as conv_err:
+            logger.warning(f"Convolution reverb memory fallback: {conv_err}")
 
         # Warm Symphony Orchestra EQ: subtle body warmth at 300Hz
         try:

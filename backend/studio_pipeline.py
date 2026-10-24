@@ -372,6 +372,15 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
         if r["engine"] != engine:
             engine_reason = f"fell back from {engine}"
         f0, fps, engine = r["f0"], r["fps"], r["engine"]
+
+    # IMMEDIATELY UNLOAD NEURAL MODELS FROM RAM / VRAM AT 85%
+    # HuBERT, RMVPE, and RVC Synthesizer weights (~2.5GB) are purged before mastering starts
+    try:
+        audio_processor.unload_vc_cache()
+    except Exception as e_unl:
+        logger.warning(f"Unload VC cache notice: {e_unl}")
+    audio_processor.clear_memory()
+
     if f0 is None:
         try:
             import voice_enhance
@@ -379,6 +388,7 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
             f0, fps = voice_enhance.analyse_f0(y_out, sr_out), 200.0
         except Exception as e:
             logger.warning(f"Melody analysis of output failed: {e}")
+            f0, fps = None, 100.0
     analysis["engine"] = engines.ENGINE_LABELS.get(engine, engine)
     analysis["engine_reason"] = engine_reason
 

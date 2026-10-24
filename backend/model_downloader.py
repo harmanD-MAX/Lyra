@@ -111,6 +111,19 @@ def ensure_singer_model(model_name: str, progress_cb=None) -> bool:
                         shutil.copyfileobj(src, f_out)
         if os.path.exists(temp_zip):
             os.remove(temp_zip)
+        # Ensure the expected .pth and .index filenames exist even if named differently inside the zip
+        if not os.path.exists(pth_file):
+            for f in os.listdir(target_dir):
+                if f.endswith(".pth") and os.path.getsize(os.path.join(target_dir, f)) > 1000000:
+                    shutil.copyfile(os.path.join(target_dir, f), pth_file)
+                    logger.info(f"Aliased {f} to {model_info['pth']}")
+                    break
+        if not os.path.exists(idx_file):
+            for f in os.listdir(target_dir):
+                if f.endswith(".index") and os.path.getsize(os.path.join(target_dir, f)) > 1000:
+                    shutil.copyfile(os.path.join(target_dir, f), idx_file)
+                    logger.info(f"Aliased {f} to {model_info['index']}")
+                    break
         logger.info(f"Extracted {singer_name} model to {target_dir}")
         return os.path.exists(pth_file)
     except Exception as e:
