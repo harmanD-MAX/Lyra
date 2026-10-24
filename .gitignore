@@ -31,8 +31,7 @@ backend/uploads/
 *.part
 
 # Frontend Builds
-dist/
-frontend/dist/
+/dist/
 .vite/
 
 # Operating System files
