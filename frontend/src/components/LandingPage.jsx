@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 import LyraLogo from './LyraLogo';
 import Glyph3D from './three/Glyph3D';
-import { HeroIllustration, StepArt, TuneIllustration, BenchmarkChart, EngineScoreBar } from './landing/Illustrations';
+import HeroVoiceRing from './landing/HeroVoiceRing';
+import { StepArt, TuneIllustration, BenchmarkChart, EngineScoreBar } from './landing/Illustrations';
 
 const GOLD = '#e5a958';
 const TEAL = '#3fe0c5';
@@ -580,7 +581,7 @@ export default function LandingPage({ onLaunchStudio }) {
           </div>
 
           <Reveal delay={200}>
-            <HeroIllustration />
+            <HeroVoiceRing />
           </Reveal>
         </div>
 
