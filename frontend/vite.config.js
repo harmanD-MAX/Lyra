@@ -8,6 +8,20 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  // Production build: no source maps, all comments and console calls
+  // stripped, identifiers mangled, so the shipped code is not readable source.
+  build: {
+    sourcemap: false,
+    rolldownOptions: {
+      output: {
+        comments: false,
+        minify: {
+          compress: { dropConsole: true, dropDebugger: true },
+          mangle: true,
+        },
+      },
+    },
+  },
   server: {
     port: 3000,
     proxy: {

@@ -39,11 +39,11 @@ export default function HeroVoiceRing() {
   return (
     <div className="relative w-full max-w-[560px] mx-auto">
       <VoiceRing color={v.color} getBands={singing}>
-        <div key={v.id} className="animate-fadeIn px-3">
-          <div className="text-[10px] font-mono uppercase tracking-[0.22em] text-white/40">Singing as</div>
-          <div className="mt-1.5 text-3xl sm:text-4xl font-bold leading-none" style={{ fontFamily: 'var(--font-display)', color: `rgb(${v.color.join(',')})` }}>{v.initials}</div>
-          <div className="mt-2 text-sm font-semibold text-white">{v.name}</div>
-          <div className="text-[11px] text-white/45">{v.tag}</div>
+        <div key={v.id} className="animate-fadeIn w-full px-[8cqw]">
+          <div className="text-[5.5cqw] font-mono uppercase tracking-[0.2em] text-white/40">Singing as</div>
+          <div className="mt-[3cqw] text-[18cqw] font-bold leading-none" style={{ fontFamily: 'var(--font-display)', color: `rgb(${v.color.join(',')})` }}>{v.initials}</div>
+          <div className="mt-[4cqw] text-[7.5cqw] font-semibold text-white truncate">{v.name}</div>
+          <div className="text-[5.5cqw] text-white/45 truncate">{v.tag}</div>
         </div>
       </VoiceRing>
     </div>

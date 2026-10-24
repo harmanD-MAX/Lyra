@@ -1393,13 +1393,13 @@ export default function StudioView({
                       {/* Voice ring driven by the real audio at the playhead */}
                       <div className="relative flex-1 min-h-[150px] grid place-items-center overflow-hidden">
                         <VoiceRing className="h-full max-w-full" color={ringColor} getBands={getRingBands}>
-                          <div className="px-2">
-                            <div className="text-[9px] sm:text-[10px] font-mono uppercase tracking-[0.22em] text-white/40">{isPlaying ? 'Now playing' : 'Paused'}</div>
-                            <div className="mt-1 text-2xl sm:text-3xl font-bold leading-none" style={{ fontFamily: 'var(--font-display)', color: `rgb(${ringColor.join(',')})` }}>
+                          <div className="w-full px-[8cqw]">
+                            <div className="text-[5.5cqw] font-mono uppercase tracking-[0.2em] text-white/40 @max-[130px]:hidden">{isPlaying ? 'Now playing' : 'Paused'}</div>
+                            <div className="mt-[2cqw] text-[18cqw] @max-[130px]:text-[30cqw] @max-[130px]:mt-0 font-bold leading-none" style={{ fontFamily: 'var(--font-display)', color: `rgb(${ringColor.join(',')})` }}>
                               {ringInitials}
                             </div>
-                            <div className="mt-1.5 text-xs sm:text-sm font-semibold text-white truncate max-w-[9rem]">{singerName}</div>
-                            <div className="text-[10px] sm:text-[11px] text-white/45">{activeStem.label}</div>
+                            <div className="mt-[3cqw] text-[8cqw] font-semibold text-white truncate @max-[130px]:hidden">{singerName}</div>
+                            <div className="text-[6.5cqw] text-white/45 truncate @max-[130px]:hidden">{activeStem.label}</div>
                           </div>
                         </VoiceRing>
                         {!decoded && (

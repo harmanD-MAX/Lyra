@@ -9,7 +9,8 @@ const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
  * `getBands(t, n)` is called every frame and returns n levels (0..1) for the
  * bars around the ring — synthetic on the landing page, the real spectrum of
  * the playing track in the studio. `color` ([r, g, b]) is eased towards, so
- * switching voices morphs the ring. `children` render in the centre disc.
+ * switching voices morphs the ring. `children` render in the centre disc,
+ * which is a size container: use cqw units so text scales with the ring.
  */
 export default function VoiceRing({ color = [229, 169, 88], getBands, className = '', children }) {
   const canvasRef = useRef(null);
@@ -122,7 +123,7 @@ export default function VoiceRing({ color = [229, 169, 88], getBands, className 
   return (
     <div className={`relative aspect-square ${className}`}>
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-hidden="true" />
-      <div className="absolute inset-[27%] rounded-full grid place-items-center text-center border border-white/10 bg-[radial-gradient(circle_at_35%_30%,rgba(255,255,255,0.08),rgba(10,11,14,0.92)_65%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_20px_60px_-20px_rgba(0,0,0,0.9)] backdrop-blur overflow-hidden">
+      <div className="absolute inset-[27%] rounded-full grid place-items-center text-center border border-white/10 bg-[radial-gradient(circle_at_35%_30%,rgba(255,255,255,0.08),rgba(10,11,14,0.92)_65%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_20px_60px_-20px_rgba(0,0,0,0.9)] backdrop-blur overflow-hidden @container">
         {children}
       </div>
     </div>
