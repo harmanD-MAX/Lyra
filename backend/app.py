@@ -85,6 +85,18 @@ async def startup_scan_jobs():
         master_wav = os.path.join(job_dir, "master_remastered.wav")
         master_mp3 = os.path.join(job_dir, "master_remastered.mp3")
         is_cloud_saved = bool(saved_res.get("saved_to_cloud") or exist_res.get("saved_to_cloud"))
+
+        # If a song is not saved in Cloudflare, purge it from the Mac's outputs directory
+        if not is_cloud_saved:
+            try:
+                shutil.rmtree(job_dir, ignore_errors=True)
+                if name in job_manager._jobs:
+                    del job_manager._jobs[name]
+                print(f"Purged unsaved local output folder from Mac: {name}")
+            except Exception as e:
+                print(f"Could not purge {name}: {e}")
+            continue
+
         has_master = os.path.exists(master_mp3) or os.path.exists(master_wav) or is_cloud_saved
 
         vocal_wav = None
@@ -748,7 +760,7 @@ async def clear_queue():
 
 @app.get("/api/jobs")
 async def list_recent_jobs():
-    return JSONResponse(content={"jobs": job_manager.list_jobs(20, completed_only=True)})
+    return JSONResponse(content={"jobs": job_manager.list_jobs(20, completed_only=True, cloud_only=True)})
 
 
 @app.post("/api/jobs/{job_id}/save_to_cloud")

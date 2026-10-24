@@ -81,17 +81,21 @@ class JobManager:
                 return True
             return False
 
-    def list_jobs(self, limit: int = 20, completed_only: bool = True) -> list:
+    def list_jobs(self, limit: int = 20, completed_only: bool = True, cloud_only: bool = True) -> list:
         with self._lock:
             outputs_dir = os.environ.get("LYRA_OUTPUTS_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs"))
             valid_jobs = []
             for j in self._jobs.values():
                 if completed_only and j.get("status") != "completed":
                     continue
+                res = j.get("results") or {}
+                is_cloud = bool(res.get("saved_to_cloud") or res.get("cloud_master_3d_url") or j.get("saved_to_cloud"))
+                if cloud_only and not is_cloud:
+                    continue
                 jid = j.get("id")
                 if jid:
                     j_dir = os.path.join(outputs_dir, jid)
-                    if not os.path.exists(j_dir):
+                    if not is_cloud and not os.path.exists(j_dir):
                         continue
                 valid_jobs.append(j)
             sorted_jobs = sorted(valid_jobs, key=lambda x: x.get("created_at", 0), reverse=True)
