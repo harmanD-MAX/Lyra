@@ -198,9 +198,17 @@ async def startup_scan_jobs():
     job_manager._save()
 
 
-# One GPU/CPU-heavy job at a time: separation, RVC and training all compete for
-# the same memory, so a single worker keeps runs fast and predictable.
-JOB_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lyra-job",
+# Multi-user concurrency & cancellation tracking
+CANCELLED_JOB_IDS = set()
+CANCELLED_JOBS_LOCK = threading.Lock()
+
+class JobCancelledError(BaseException):
+    """Raised to immediately abort a running job thread when cancelled by the user."""
+    pass
+
+# Support multiple users converting at the same time without lag (configurable, default 4)
+MAX_CONCURRENT_WORKERS = int(os.environ.get("LYRA_MAX_WORKERS", "4"))
+JOB_EXECUTOR = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_WORKERS, thread_name_prefix="lyra-job",
                                   initializer=resources.apply_worker_limits)
 
 
@@ -209,9 +217,17 @@ def run_pipeline(job_id: str, params: "studio_pipeline.JobParams"):
     os.makedirs(job_dir, exist_ok=True)
 
     def progress_callback(progress: int, message: str):
+        with CANCELLED_JOBS_LOCK:
+            if job_id in CANCELLED_JOB_IDS:
+                raise JobCancelledError(f"Job {job_id} cancelled by user")
+        if not job_manager.get_job(job_id):
+            raise JobCancelledError(f"Job {job_id} removed from queue")
         job_manager.update_job(job_id, progress=progress, message=message)
 
     try:
+        with CANCELLED_JOBS_LOCK:
+            if job_id in CANCELLED_JOB_IDS:
+                raise JobCancelledError(f"Job {job_id} cancelled before start")
         job_manager.update_job(job_id, status="processing", progress=3, message="Job started...")
         out = studio_pipeline.run(job_dir, params, progress_callback)
         meta_info = out["meta"]
@@ -304,6 +320,19 @@ def run_pipeline(job_id: str, params: "studio_pipeline.JobParams"):
             print("Could not save job meta.json:", err)
         freed = resources.cleanup_job(job_dir)
         print(f"Job {job_id}: removed {freed:.0f} MB of temporary files")
+    except JobCancelledError:
+        print(f"[Lyra] Job {job_id} cancelled by user: terminating pipeline and purging files immediately.")
+        with CANCELLED_JOBS_LOCK:
+            CANCELLED_JOB_IDS.discard(job_id)
+        if os.path.exists(job_dir):
+            shutil.rmtree(job_dir, ignore_errors=True)
+        job_manager.delete_job(job_id)
+        try:
+            audio_processor.unload_vc_cache()
+        except Exception:
+            pass
+        audio_processor.clear_memory()
+        return
     except BaseException as e:
         print(f"Error in job {job_id}: {traceback.format_exc()}")
         job_manager.update_job(job_id, status="error", error=str(e))
@@ -787,12 +816,30 @@ async def get_job_status(job_id: str):
     return JSONResponse(content=job)
 
 
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_specific_job(job_id: str):
+    """Cancels a running or queued job, immediately interrupts worker thread, and removes output files."""
+    with CANCELLED_JOBS_LOCK:
+        CANCELLED_JOB_IDS.add(job_id)
+    job_manager.delete_job(job_id)
+    job_dir = os.path.join(OUTPUTS_DIR, job_id)
+    if os.path.exists(job_dir):
+        shutil.rmtree(job_dir, ignore_errors=True)
+    return JSONResponse(content={"status": "cancelled", "job_id": job_id})
+
+
 @app.post("/api/jobs/clear_queue")
 async def clear_queue():
     with job_manager._lock:
         pending_ids = [jid for jid, j in job_manager._jobs.items() if j.get("status") in ["queued", "processing", "error"]]
+        with CANCELLED_JOBS_LOCK:
+            for jid in pending_ids:
+                CANCELLED_JOB_IDS.add(jid)
         for jid in pending_ids:
             del job_manager._jobs[jid]
+            job_dir = os.path.join(OUTPUTS_DIR, jid)
+            if os.path.exists(job_dir):
+                shutil.rmtree(job_dir, ignore_errors=True)
         job_manager._save()
     return JSONResponse(content={"status": "success", "cleared_count": len(pending_ids)})
 
