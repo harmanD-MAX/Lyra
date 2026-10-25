@@ -9,9 +9,13 @@ import shutil
 import threading
 import asyncio
 import traceback
+import re
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from dotenv import load_dotenv
+
+logger = logging.getLogger("lyra_app")
 
 # Load environment variables from .env
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
@@ -72,7 +76,264 @@ app.add_middleware(
 async def startup_scan_jobs():
     job_manager._load()
     job_manager.sync_cloud_catalog()
-    d1_db.init_schema()
+    try:
+        d1_db.init_schema()
+    except Exception as e:
+        logger.error(f"D1 init error: {e}")
+
+    if os.path.exists(OUTPUTS_DIR):
+        for name in os.listdir(OUTPUTS_DIR):
+            job_dir = os.path.join(OUTPUTS_DIR, name)
+            if not os.path.isdir(job_dir):
+                continue
+
+            existing = job_manager._jobs.get(name)
+
+            # Check if meta.json exists inside the job directory
+            meta_file = os.path.join(job_dir, "meta.json")
+            saved_meta = None
+            if os.path.exists(meta_file):
+                try:
+                    with open(meta_file, "r") as f:
+                        saved_meta = json.load(f)
+                except Exception:
+                    saved_meta = None
+
+            if existing and existing.get("status") == "completed":
+                ext_res = existing.get("results") or {}
+                ext_title = ext_res.get("title") or existing.get("metadata", {}).get("title") or ""
+                if ext_title and not ext_title.startswith("Song Conversion (") and "Bigg Boss" not in ext_title and ext_res.get("singer"):
+                    continue
+
+            saved_res = (saved_meta.get("results") or {}) if isinstance(saved_meta, dict) else {}
+            exist_res = (existing.get("results") or {}) if isinstance(existing, dict) else {}
+            exist_meta = (existing.get("metadata") or {}) if isinstance(existing, dict) else {}
+
+            master_wav = os.path.join(job_dir, "master_remastered.wav")
+            master_mp3 = os.path.join(job_dir, "master_remastered.mp3")
+            is_cloud_saved = bool(saved_res.get("saved_to_cloud") or exist_res.get("saved_to_cloud"))
+
+            has_master = os.path.exists(master_mp3) or os.path.exists(master_wav) or is_cloud_saved
+
+            vocal_wav = None
+            for candidate in ["arijit_vocals.wav", "vocal_processed.wav", "vocals.wav"]:
+                p = os.path.join(job_dir, candidate)
+                if os.path.exists(p):
+                    vocal_wav = p
+                    break
+
+            if has_master:
+                has_inst = os.path.exists(os.path.join(job_dir, "instrumental.wav")) or os.path.exists(os.path.join(job_dir, "accompaniment.wav"))
+                has_orig_vocal = os.path.exists(os.path.join(job_dir, "vocals.wav"))
+
+                # Determine model_name and singer
+                model_name = (saved_meta.get("model_name") if saved_meta else None) or \
+                             exist_meta.get("model_name") or \
+                             exist_res.get("model_name") or \
+                             "arijit_singh"
+                model_info = audio_processor.AVAILABLE_MODELS.get(model_name, audio_processor.AVAILABLE_MODELS.get("arijit_singh", {"name": "Arijit Singh"}))
+                singer_name = (saved_meta.get("singer") if saved_meta else None) or \
+                              exist_res.get("singer") or \
+                              model_info.get("name", "Arijit Singh")
+
+                # Determine real song title
+                real_title = None
+                if saved_meta and saved_meta.get("title") and "Bigg Boss" not in saved_meta.get("title", ""):
+                    real_title = saved_meta["title"]
+                elif existing:
+                    cand = exist_res.get("title") or exist_meta.get("title") or exist_meta.get("filename")
+                    if cand and not str(cand).startswith("Song Conversion (") and "Bigg Boss" not in str(cand):
+                        real_title = cand
+                    elif exist_meta.get("youtube_url"):
+                        real_title = f"YouTube Track ({singer_name} Version)"
+                    elif exist_meta.get("spotify_url"):
+                        real_title = f"Spotify Track ({singer_name} Version)"
+
+                if not real_title or real_title.startswith("Song Conversion (") or "Bigg Boss" in str(real_title):
+                    real_title = f"Studio Track {name[:6]} ({singer_name} Version)"
+
+                thumbnail = (saved_meta.get("thumbnail") if saved_meta else None) or \
+                            exist_res.get("thumbnail") or \
+                            ""
+
+                uploader = (saved_meta.get("uploader") if saved_meta else None) or \
+                           exist_res.get("uploader") or \
+                           "AI Studio"
+
+                cloud_master_url = saved_res.get("cloud_master_3d_url") or exist_res.get("cloud_master_3d_url")
+
+                job_manager._jobs[name] = {
+                    "id": name,
+                    "status": "completed",
+                    "progress": 100,
+                    "message": f"Completed with authentic {singer_name} diction & pitch lock",
+                    "created_at": existing.get("created_at") if existing else (os.path.getctime(master_mp3) if os.path.exists(master_mp3) else (os.path.getctime(master_wav) if os.path.exists(master_wav) else time.time())),
+                    "updated_at": existing.get("updated_at") if existing else (os.path.getmtime(master_mp3) if os.path.exists(master_mp3) else (os.path.getmtime(master_wav) if os.path.exists(master_wav) else time.time())),
+                    "metadata": {
+                        "title": real_title,
+                        "model_name": model_name,
+                        "singer_name": singer_name,
+                        **exist_meta
+                    },
+                    "results": {
+                        "title": real_title,
+                        "thumbnail": thumbnail,
+                        "duration": (saved_meta.get("duration") if saved_meta else None) or exist_res.get("duration") or 52.8,
+                        "uploader": uploader,
+                        "singer": singer_name,
+                        "model_name": model_name,
+                        "saved_to_cloud": is_cloud_saved,
+                        "cloud_master_3d_url": cloud_master_url,
+                        "input_audio": f"/api/audio/{name}/input",
+                        "vocals_original": f"/api/audio/{name}/vocal_original" if has_orig_vocal else "",
+                        "instrumental": f"/api/audio/{name}/instrumental" if has_inst else "",
+                        "vocals_arijit": f"/api/audio/{name}/vocal_arijit",
+                        "vocals_converted": f"/api/audio/{name}/vocal_arijit",
+                        "master_remastered_wav": f"/api/audio/{name}/master_wav",
+                        "master_remastered_mp3": f"/api/audio/{name}/master_mp3",
+                        "settings": {
+                            "model_name": model_name,
+                            "singer_name": singer_name,
+                            "pitch_shift": 0,
+                            "f0_method": "rmvpe",
+                            "index_rate": 0.28,
+                            "protect": 0.50,
+                            "vocal_gain_db": 0.0,
+                            "inst_gain_db": 0.0,
+                            "reverb_amount": 0.0,
+                            "echo_amount": 0.0,
+                            "master_profile": "clean_natural"
+                        }
+                    },
+                    "error": None,
+                    "logs": existing.get("logs", ["Synthesis completed successfully"]) if existing else ["Synthesis completed successfully"]
+                }
+
+    # Persist the preserved metadata
+    job_manager._save()
+
+
+def get_drive_target_dir() -> Optional[str]:
+    """Returns the Google Drive directory where songs are saved, or None if Drive is not mounted."""
+    candidates = [
+        os.environ.get("LYRA_DRIVE_DIR"),
+        "/content/drive/MyDrive/lyra-songs",
+        "/content/drive/MyDrive/ysra-songs",
+    ]
+    for c in candidates:
+        if c and os.path.isdir(c):
+            return c
+    if os.path.isdir("/content/drive/MyDrive"):
+        p = "/content/drive/MyDrive/lyra-songs"
+        os.makedirs(p, exist_ok=True)
+        return p
+    return None
+
+
+def export_song_to_drive(job_id: str, job_dir: str, results: dict) -> Optional[str]:
+    """
+    Exports all audio stems for a song into a dedicated folder on Google Drive named after the song.
+    Path: /content/drive/MyDrive/lyra-songs/<Sanitized Song Title>/
+    Contains:
+      - 01 - Master 3D (Spatial Remaster).mp3 / .wav
+      - 02 - Master Natural Clean.mp3 / .wav
+      - 03 - Lead Vocal (Polished AI Stem).mp3 / .wav
+      - 04 - Backing Track (Instrumental Stem).mp3 / .wav
+      - 05 - Original Input Vocal.mp3 / .wav
+      - meta.json
+      - analysis.json (if present)
+    """
+    drive_base = get_drive_target_dir()
+    if not drive_base or not os.path.isdir(drive_base):
+        return None
+
+    title = results.get("title") or f"Lyra Track {job_id[:6]}"
+    clean_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
+    if not clean_title:
+        clean_title = f"Track_{job_id[:6]}"
+
+    song_folder = os.path.join(drive_base, clean_title)
+    os.makedirs(song_folder, exist_ok=True)
+
+    def _copy_stem(src_names: list, dst_name: str):
+        for s in src_names:
+            src_p = os.path.join(job_dir, s)
+            if os.path.exists(src_p) and os.path.getsize(src_p) > 100:
+                dst_p = os.path.join(song_folder, dst_name)
+                if os.path.abspath(src_p) != os.path.abspath(dst_p):
+                    try:
+                        if os.path.exists(dst_p):
+                            os.remove(dst_p)
+                        try:
+                            os.link(src_p, dst_p)
+                        except Exception:
+                            shutil.copy2(src_p, dst_p)
+                    except Exception as e:
+                        logger.warning(f"Could not copy {s} to drive: {e}")
+                return
+
+    # 1. Master 3D
+    _copy_stem(["master_remastered.mp3", "master_3d.mp3"], "01 - Master 3D (Spatial Remaster).mp3")
+    _copy_stem(["master_remastered.wav"], "01 - Master 3D (Lossless 24-bit).wav")
+
+    # 2. Master Clean Natural
+    _copy_stem(["master_clean.mp3", "master_natural_clean.mp3"], "02 - Master Natural Clean.mp3")
+    _copy_stem(["master_clean.wav", "master_natural_clean.wav"], "02 - Master Natural Clean.wav")
+
+    # 3. Lead Vocal AI
+    _copy_stem(["vocal_processed.wav", "arijit_vocals.wav", "vocals_converted.wav", "vocals_polished.wav"], "03 - Lead Vocal (Polished AI Stem).wav")
+    _copy_stem(["vocal_processed.mp3", "arijit_vocals.mp3", "vocals_converted.mp3"], "03 - Lead Vocal (Polished AI Stem).mp3")
+
+    # 4. Backing Track / Instrumental
+    _copy_stem(["accompaniment.wav", "instrumental.wav", "guide/accompaniment.wav"], "04 - Backing Track (Instrumental Stem).wav")
+    _copy_stem(["accompaniment.mp3", "instrumental.mp3"], "04 - Backing Track (Instrumental Stem).mp3")
+
+    # 5. Original Input Vocal
+    _copy_stem(["vocals.wav", "vocals_original.wav", "input_audio.wav"], "05 - Original Input Vocal.wav")
+    _copy_stem(["vocals.mp3", "vocals_original.mp3"], "05 - Original Input Vocal.mp3")
+
+    # 6. Additional DAW stems if available
+    daw_stems_dir = os.path.join(job_dir, "stems")
+    if os.path.isdir(daw_stems_dir):
+        drive_daw_dir = os.path.join(song_folder, "daw_stems")
+        os.makedirs(drive_daw_dir, exist_ok=True)
+        for s in os.listdir(daw_stems_dir):
+            sp = os.path.join(daw_stems_dir, s)
+            dp = os.path.join(drive_daw_dir, s)
+            if os.path.isfile(sp) and os.path.abspath(sp) != os.path.abspath(dp):
+                try:
+                    if os.path.exists(dp):
+                        os.remove(dp)
+                    try:
+                        os.link(sp, dp)
+                    except Exception:
+                        shutil.copy2(sp, dp)
+                except Exception:
+                    pass
+
+    # 7. Metadata JSON
+    try:
+        with open(os.path.join(song_folder, "meta.json"), "w") as f:
+            json.dump({
+                "id": job_id,
+                "title": title,
+                "drive_folder": song_folder,
+                "exported_at": time.time(),
+                "results": results
+            }, f, indent=2)
+    except Exception as e:
+        logger.warning(f"Could not save meta.json to drive: {e}")
+
+    # Copy analysis if present
+    analysis_src = os.path.join(job_dir, "analysis.json")
+    if os.path.exists(analysis_src):
+        try:
+            shutil.copy2(analysis_src, os.path.join(song_folder, "analysis.json"))
+        except Exception:
+            pass
+
+    logger.info(f"Successfully exported song stems to Google Drive: {song_folder}")
+    return song_folder
 
 
 def _require_user(request: Request) -> Optional[str]:
@@ -135,148 +396,6 @@ async def auth_logout():
     response = JSONResponse(content={"status": "signed_out"})
     response.delete_cookie(auth.SESSION_COOKIE)
     return response
-
-    for name in os.listdir(OUTPUTS_DIR):
-        job_dir = os.path.join(OUTPUTS_DIR, name)
-        if not os.path.isdir(job_dir):
-            continue
-
-        existing = job_manager._jobs.get(name)
-
-        # 1. Check if meta.json exists inside the job directory
-        meta_file = os.path.join(job_dir, "meta.json")
-        saved_meta = None
-        if os.path.exists(meta_file):
-            try:
-                with open(meta_file, "r") as f:
-                    saved_meta = json.load(f)
-            except Exception:
-                saved_meta = None
-
-        # If already preserved with a valid real title and singer (and not corrupted with Bigg Boss), keep it intact!
-        if existing and existing.get("status") == "completed":
-            ext_res = existing.get("results") or {}
-            ext_title = ext_res.get("title") or existing.get("metadata", {}).get("title") or ""
-            if ext_title and not ext_title.startswith("Song Conversion (") and "Bigg Boss" not in ext_title and ext_res.get("singer"):
-                continue
-
-        saved_res = (saved_meta.get("results") or {}) if isinstance(saved_meta, dict) else {}
-        exist_res = (existing.get("results") or {}) if isinstance(existing, dict) else {}
-        exist_meta = (existing.get("metadata") or {}) if isinstance(existing, dict) else {}
-
-        master_wav = os.path.join(job_dir, "master_remastered.wav")
-        master_mp3 = os.path.join(job_dir, "master_remastered.mp3")
-        is_cloud_saved = bool(saved_res.get("saved_to_cloud") or exist_res.get("saved_to_cloud"))
-
-        # If a song is not saved in Cloudflare, purge it from the Mac's outputs directory
-        if not is_cloud_saved:
-            try:
-                shutil.rmtree(job_dir, ignore_errors=True)
-                if name in job_manager._jobs:
-                    del job_manager._jobs[name]
-                print(f"Purged unsaved local output folder from Mac: {name}")
-            except Exception as e:
-                print(f"Could not purge {name}: {e}")
-            continue
-
-        has_master = os.path.exists(master_mp3) or os.path.exists(master_wav) or is_cloud_saved
-
-        vocal_wav = None
-        for candidate in ["arijit_vocals.wav", "vocal_processed.wav", "vocals.wav"]:
-            p = os.path.join(job_dir, candidate)
-            if os.path.exists(p):
-                vocal_wav = p
-                break
-
-        if has_master:
-            has_inst = os.path.exists(os.path.join(job_dir, "instrumental.wav"))
-            has_orig_vocal = os.path.exists(os.path.join(job_dir, "vocals.wav"))
-
-            # Determine model_name and singer
-            model_name = (saved_meta.get("model_name") if saved_meta else None) or \
-                         exist_meta.get("model_name") or \
-                         exist_res.get("model_name") or \
-                         "arijit_singh"
-            model_info = audio_processor.AVAILABLE_MODELS.get(model_name, audio_processor.AVAILABLE_MODELS.get("arijit_singh", {"name": "Arijit Singh"}))
-            singer_name = (saved_meta.get("singer") if saved_meta else None) or \
-                          exist_res.get("singer") or \
-                          model_info.get("name", "Arijit Singh")
-
-            # Determine real song title
-            real_title = None
-            if saved_meta and saved_meta.get("title") and "Bigg Boss" not in saved_meta.get("title", ""):
-                real_title = saved_meta["title"]
-            elif existing:
-                cand = exist_res.get("title") or exist_meta.get("title") or exist_meta.get("filename")
-                if cand and not str(cand).startswith("Song Conversion (") and "Bigg Boss" not in str(cand):
-                    real_title = cand
-                elif exist_meta.get("youtube_url"):
-                    real_title = f"YouTube Track ({singer_name} Version)"
-                elif exist_meta.get("spotify_url"):
-                    real_title = f"Spotify Track ({singer_name} Version)"
-
-            if not real_title or real_title.startswith("Song Conversion (") or "Bigg Boss" in str(real_title):
-                real_title = f"Studio Track {name[:6]} ({singer_name} Version)"
-
-            thumbnail = (saved_meta.get("thumbnail") if saved_meta else None) or \
-                        exist_res.get("thumbnail") or \
-                        ""
-
-            uploader = (saved_meta.get("uploader") if saved_meta else None) or \
-                       exist_res.get("uploader") or \
-                       "AI Studio"
-
-            cloud_master_url = saved_res.get("cloud_master_3d_url") or exist_res.get("cloud_master_3d_url")
-
-            job_manager._jobs[name] = {
-                "id": name,
-                "status": "completed",
-                "progress": 100,
-                "message": f"Completed with authentic {singer_name} diction & pitch lock",
-                "created_at": existing.get("created_at") if existing else (os.path.getctime(master_mp3) if os.path.exists(master_mp3) else (os.path.getctime(master_wav) if os.path.exists(master_wav) else time.time())),
-                "updated_at": existing.get("updated_at") if existing else (os.path.getmtime(master_mp3) if os.path.exists(master_mp3) else (os.path.getmtime(master_wav) if os.path.exists(master_wav) else time.time())),
-                "metadata": {
-                    "title": real_title,
-                    "model_name": model_name,
-                    "singer_name": singer_name,
-                    **exist_meta
-                },
-                "results": {
-                    "title": real_title,
-                    "thumbnail": thumbnail,
-                    "duration": (saved_meta.get("duration") if saved_meta else None) or exist_res.get("duration") or 52.8,
-                    "uploader": uploader,
-                    "singer": singer_name,
-                    "model_name": model_name,
-                    "saved_to_cloud": is_cloud_saved,
-                    "cloud_master_3d_url": cloud_master_url,
-                    "input_audio": f"/api/audio/{name}/input",
-                    "vocals_original": f"/api/audio/{name}/vocal_original" if has_orig_vocal else "",
-                    "instrumental": f"/api/audio/{name}/instrumental" if has_inst else "",
-                    "vocals_arijit": f"/api/audio/{name}/vocal_arijit",
-                    "vocals_converted": f"/api/audio/{name}/vocal_arijit",
-                    "master_remastered_wav": f"/api/audio/{name}/master_wav",
-                    "master_remastered_mp3": f"/api/audio/{name}/master_mp3",
-                    "settings": {
-                        "model_name": model_name,
-                        "singer_name": singer_name,
-                        "pitch_shift": 0,
-                        "f0_method": "rmvpe",
-                        "index_rate": 0.28,
-                        "protect": 0.50,
-                        "vocal_gain_db": 0.0,
-                        "inst_gain_db": 0.0,
-                        "reverb_amount": 0.0,
-                        "echo_amount": 0.0,
-                        "master_profile": "clean_natural"
-                    }
-                },
-                "error": None,
-                "logs": existing.get("logs", ["Synthesis completed successfully"]) if existing else ["Synthesis completed successfully"]
-            }
-
-    # Persist the preserved metadata
-    job_manager._save()
 
 
 # Multi-user concurrency & cancellation tracking
@@ -346,10 +465,17 @@ def run_pipeline(job_id: str, params: "studio_pipeline.JobParams"):
         }
         results["settings"]["singer_name"] = target_name
 
-        # Fresh studio render: keep all 4 stems local and unsaved so the user can audition them in Studio.
+        # Fresh studio render: keep all stems local and unsaved so the user can audition them in Studio.
         # Master 3D will be saved to Cloudflare R2 on user request or when the user creates a new song / leaves.
         results["saved_to_cloud"] = False
         results["cloud_master_3d_url"] = ""
+
+        try:
+            drive_folder = export_song_to_drive(job_id, job_dir, results)
+            if drive_folder:
+                results["drive_folder"] = drive_folder
+        except Exception as e:
+            print("Could not export song stems to Google Drive:", e)
 
         job_manager.update_job(job_id, status="completed", progress=100,
                                message=f"{target_name} version finished!", results=results)
@@ -993,6 +1119,14 @@ async def save_job_to_cloud(job_id: str, request: Request):
     job["results"]["saved_to_cloud"] = True
     job["results"]["cloud_master_3d_url"] = cloud_url
     job["saved_to_cloud"] = True
+
+    try:
+        drive_folder = export_song_to_drive(job_id, job_dir, job["results"])
+        if drive_folder:
+            job["results"]["drive_folder"] = drive_folder
+    except Exception as e:
+        print("Could not update Drive folder on save_to_cloud:", e)
+
     job_manager._jobs[job_id] = job
     job_manager._save()
 
@@ -1227,13 +1361,18 @@ def stream_audio_file(file_path: str, request: Request, media_type: str, downloa
 @app.api_route("/api/audio/{job_id}/{track_type}", methods=["GET", "HEAD"])
 async def get_audio_file(job_id: str, track_type: str, request: Request, download: bool = False):
     job_dir = os.path.join(OUTPUTS_DIR, job_id)
+    job_obj = job_manager.get_job(job_id)
+    drive_folder = (job_obj.get("results") or {}).get("drive_folder") if job_obj else None
     if not os.path.isdir(job_dir):
         for cand_dir in [
+            drive_folder,
+            os.path.join(OUTPUTS_DIR, ".internal_jobs", job_id),
             os.path.join(BASE_DIR, "outputs", job_id),
             os.path.join("/content/drive/MyDrive/lyra-songs", job_id),
+            os.path.join("/content/drive/MyDrive/lyra-songs", ".internal_jobs", job_id),
             os.path.join("/content/drive/MyDrive/ysra-songs", job_id)
         ]:
-            if os.path.isdir(cand_dir):
+            if cand_dir and os.path.isdir(cand_dir):
                 job_dir = cand_dir
                 break
     
@@ -1265,6 +1404,27 @@ async def get_audio_file(job_id: str, track_type: str, request: Request, downloa
         raise HTTPException(status_code=400, detail="Invalid track type")
         
     file_path = os.path.join(job_dir, filename)
+    if not os.path.exists(file_path):
+        # Check stem aliases in job_dir or drive_folder
+        stem_aliases = {
+            "master_mp3": ["01 - Master 3D (Spatial Remaster).mp3", "master_remastered.mp3", "master_3d.mp3"],
+            "master_wav": ["01 - Master 3D (Lossless 24-bit).wav", "master_remastered.wav"],
+            "master_clean_mp3": ["02 - Master Natural Clean.mp3", "master_clean.mp3"],
+            "master_clean_wav": ["02 - Master Natural Clean.wav", "master_clean.wav"],
+            "vocal_converted": ["03 - Lead Vocal (Polished AI Stem).wav", "03 - Lead Vocal (Polished AI Stem).mp3", "vocal_processed.wav"],
+            "vocal_arijit": ["03 - Lead Vocal (Polished AI Stem).wav", "03 - Lead Vocal (Polished AI Stem).mp3", "vocal_processed.wav"],
+            "instrumental": ["04 - Backing Track (Instrumental Stem).mp3", "04 - Backing Track (Instrumental Stem).wav", "accompaniment.mp3", "accompaniment.wav", "instrumental.wav"],
+            "vocal_original": ["05 - Original Input Vocal.mp3", "05 - Original Input Vocal.wav", "vocals.mp3", "vocals.wav"]
+        }
+        for alt_alias in stem_aliases.get(track_type, []):
+            for d in [job_dir, drive_folder]:
+                if d:
+                    cand_p = os.path.join(d, alt_alias)
+                    if os.path.exists(cand_p) and os.path.getsize(cand_p) > 100:
+                        file_path = cand_p
+                        break
+            if os.path.exists(file_path):
+                break
     if not os.path.exists(file_path):
         # Ensure clean unremastered master is synthesized on the fly if missing (0% remastering)
         if track_type in ["master_clean", "master_clean_mp3", "master_clean_wav"]:
