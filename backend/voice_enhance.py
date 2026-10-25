@@ -158,13 +158,38 @@ def retune_world(
 # ---------------------------------------------------------------------------
 
 # Seed-VC re-generates the voice, so its output can drift off the corrected
-# melody and crack on fast or high notes. These presets tune the output a
-# second time. Retune speed stays slow enough to keep slides and meend.
-OUTPUT_TUNE_STYLES = {
-    "natural": dict(strength=0.45, retune_ms=70.0, steadiness=0.30, vibrato=0.15),
-    "soulful": dict(strength=0.70, retune_ms=55.0, steadiness=0.50, vibrato=0.35),
-    "strong": dict(strength=0.95, retune_ms=25.0, steadiness=0.75, vibrato=0.20),
-}
+# melody and crack on fast or high notes. The final tune polishes the output
+# with one "soulful" setting: in key, steady held notes, gentle vibrato on long
+# notes, and a retune speed slow enough to keep slides and meend.
+SOULFUL_TUNE = dict(strength=0.70, retune_ms=55.0, steadiness=0.50, vibrato=0.35)
+
+
+def analyse_f0_rmvpe(y: np.ndarray, sr: int):
+    """Singing pitch with RMVPE (robust on breathy and high notes). Returns (f0, fps); harvest fallback."""
+    try:
+        import os
+        import librosa
+        import torch
+        from configs.config import Config
+        from infer.rmvpe import RMVPE
+
+        root = os.environ.get("rmvpe_root", os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets"))
+        path = os.path.join(root, "rmvpe.pt")
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
+        config = Config()
+        model = RMVPE(path, is_half=config.is_half, device=config.device)
+        mono = y.astype(np.float32) if y.ndim == 1 else y.mean(axis=1).astype(np.float32)
+        y16 = librosa.resample(mono, orig_sr=sr, target_sr=16000) if sr != 16000 else mono
+        with torch.no_grad():
+            f0 = model.infer_from_audio(y16, thred=0.03).astype(np.float64)
+        del model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return f0, 100.0
+    except Exception as e:
+        logger.info(f"RMVPE unavailable for the final tune ({e}); using harvest")
+        return analyse_f0(y, sr), 1000.0 / FRAME_PERIOD_MS
 
 
 def repair_f0_cracks(f0: np.ndarray, fps: float) -> np.ndarray:
@@ -225,26 +250,23 @@ def polish_output_pitch(
     input_wav: str,
     output_wav: str,
     key=None,
-    style: str = "soulful",
     progress_cb=None,
 ) -> dict:
     """
     Final vocal tune on the converted vocal: repair pitch cracks, bring notes into
     key, steady shaky held notes and bloom gentle vibrato on long notes.
-    Pitch is moved with PSOLA so the converted timbre is not re-synthesized.
-    Returns {"path", "f0", "fps"}.
+    Pitch is moved with PSOLA, and only notes that actually need moving are replaced,
+    so the rest of the converted vocal is left untouched. Returns {"path", "f0", "fps"}.
     """
     import melody
 
-    settings = OUTPUT_TUNE_STYLES.get(style, OUTPUT_TUNE_STYLES["soulful"])
     audio, sr = sf.read(input_wav, always_2d=True)
-    fps = 1000.0 / FRAME_PERIOD_MS
 
     if progress_cb:
-        progress_cb(84, "Final vocal tune: repairing pitch cracks...")
-    f0 = analyse_f0(audio.mean(axis=1), sr)
+        progress_cb(84, "Autotune: reading the sung pitch (RMVPE)...")
+    f0, fps = analyse_f0_rmvpe(audio, sr)
     repaired = repair_f0_cracks(f0, fps)
-    target = melody.correct_pitch(repaired, fps=fps, key=key, **settings).astype(np.float64)
+    target = melody.correct_pitch(repaired, fps=fps, key=key, **SOULFUL_TUNE).astype(np.float64)
 
     # Never move a frame more than 2 semitones from what was sung (tracker errors)
     voiced = (repaired > 0) & (target > 0)
@@ -253,14 +275,25 @@ def polish_output_pitch(
     target = np.where(voiced, repaired * ratio, 0.0)
 
     if progress_cb:
-        progress_cb(85, f"Final vocal tune ({style}): in key, steady notes, vibrato on long notes...")
+        progress_cb(85, "Autotune: in key, steady notes, vibrato on long notes...")
     try:
         y = _psola_retune(audio, sr, target, fps)
     except Exception as e:
         logger.info(f"PSOLA retune unavailable ({e}); using WORLD for the final tune")
         return retune_world(input_wav, output_wav,
-                            lambda f, _fps: melody.correct_pitch(repair_f0_cracks(f, _fps), fps=_fps, key=key, **settings),
+                            lambda f, _fps: melody.correct_pitch(repair_f0_cracks(f, _fps), fps=_fps, key=key, **SOULFUL_TUNE),
                             smooth_tone=0.0)
+
+    # Keep the original wherever a note barely moves (< 4 cents) and in all
+    # unvoiced sound (consonants, breaths); crossfade 15 ms in and out
+    from scipy.ndimage import binary_dilation, uniform_filter1d
+    cents = np.zeros_like(target)
+    cents[voiced] = 1200.0 * np.abs(np.log2(ratio[voiced]))
+    need = binary_dilation(voiced & (cents > 4.0), iterations=max(1, int(0.03 * fps)))
+    hop = sr / fps
+    frame_of_sample = np.minimum((np.arange(len(audio)) / hop).astype(int), len(need) - 1)
+    mask = uniform_filter1d(need[frame_of_sample].astype(np.float32), size=max(1, int(0.015 * sr)))
+    y = audio.astype(np.float32) * (1.0 - mask[:, None]) + y * mask[:, None]
 
     peak = float(np.max(np.abs(y))) + 1e-9
     if peak > 0.98:
