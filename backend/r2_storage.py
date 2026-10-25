@@ -114,19 +114,62 @@ def get_r2_presigned_url(remote_key: str, expires_in: int = 86400) -> Optional[s
 
 
 def get_cloud_catalog() -> dict:
-    """Fetches the global cloud_catalog.json from Cloudflare R2 bucket."""
+    """Fetches the global cloud_catalog.json from Cloudflare R2 bucket and auto-discovers all songs."""
     if not is_r2_configured():
         return {}
     client = get_r2_client()
     if not client:
         return {}
+    catalog = {}
     try:
         import json
         resp = client.get_object(Bucket=R2_BUCKET_NAME, Key="cloud_catalog.json")
         content = resp["Body"].read().decode("utf-8")
-        return json.loads(content)
+        catalog = json.loads(content)
     except Exception:
-        return {}
+        catalog = {}
+
+    # Automatically discover and reconcile any uncataloged songs uploaded to R2
+    try:
+        resp = client.list_objects_v2(Bucket=R2_BUCKET_NAME)
+        updated = False
+        import time
+        for item in resp.get("Contents", []):
+            key = item["Key"]
+            if "/" in key and not key.startswith("models/"):
+                jid, fname = key.split("/", 1)
+                if jid not in catalog and (fname.startswith("master") or fname.endswith(".mp3") or fname.endswith(".wav")):
+                    cloud_url = f"{R2_CUSTOM_DOMAIN.rstrip('/')}/{key}" if R2_CUSTOM_DOMAIN else key
+                    catalog[jid] = {
+                        "id": jid,
+                        "status": "completed",
+                        "progress": 100,
+                        "created_at": item.get("LastModified").timestamp() if hasattr(item.get("LastModified"), "timestamp") else time.time(),
+                        "updated_at": time.time(),
+                        "metadata": {
+                            "title": f"Cloudflare Master {jid[:6]} (Arijit Singh Version)",
+                            "singer": "Arijit Singh",
+                            "model_name": "arijit_singh",
+                            "duration": 329,
+                            "thumbnail": ""
+                        },
+                        "results": {
+                            "title": f"Cloudflare Master {jid[:6]} (Arijit Singh Version)",
+                            "singer": "Arijit Singh",
+                            "model_name": "arijit_singh",
+                            "saved_to_cloud": True,
+                            "cloud_master_3d_url": cloud_url,
+                            "cloud_only": True,
+                            "master_remastered_mp3": cloud_url
+                        }
+                    }
+                    updated = True
+        if updated:
+            save_cloud_catalog(catalog)
+    except Exception as e:
+        logger.warning(f"Error discovering R2 objects: {e}")
+
+    return catalog
 
 
 def save_cloud_catalog(catalog: dict) -> bool:

@@ -303,6 +303,7 @@ export default function App() {
           onBackToLanding={() => navigateTo('landing')}
           onDeleteJob={handleDeleteJob}
           personalVoices={personalVoices}
+          onRefreshJobs={fetchRecentJobs}
         />
       )}
 

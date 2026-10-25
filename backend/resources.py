@@ -118,9 +118,11 @@ def has_room_for(size_bytes: int, what: str = "model") -> bool:
 # 4. meta.json & pipeline_state.json (track title, artist, art)
 _KEEP = {
     "meta.json", "pipeline_state.json",
-    "master_remastered.mp3",
-    "converted_vocals.wav", "vocal_processed.wav",
-    "accompaniment.wav", "instrumental.wav",
+    "master_remastered.mp3", "master_remastered.wav",
+    "master_clean.mp3", "master_clean.wav",
+    "converted_vocals.wav", "vocal_processed.wav", "vocal_processed.mp3",
+    "accompaniment.wav", "accompaniment.mp3", "instrumental.wav",
+    "vocals.wav", "vocals.mp3", "input_audio.wav"
 }
 
 

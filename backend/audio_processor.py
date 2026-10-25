@@ -1309,6 +1309,17 @@ def master_and_remaster_track(
     os.system(f"ffmpeg -y -i '{master_wav}' -codec:a libopus -b:a 160k -vbr on '{master_opus}' > /dev/null 2>&1")
     os.system(f"ffmpeg -y -i '{master_clean_wav}' -codec:a libopus -b:a 160k -vbr on '{master_clean_opus}' > /dev/null 2>&1")
 
+    # Export lightweight MP3 stem previews for 0ms instant browser playback & RAM buffering
+    try:
+        if os.path.exists(vocal_processed_path):
+            os.system(f"ffmpeg -y -i '{vocal_processed_path}' -codec:a libmp3lame -b:a 192k '{os.path.join(output_dir, 'vocal_processed.mp3')}' > /dev/null 2>&1")
+        if inst_wav and os.path.exists(inst_wav):
+            os.system(f"ffmpeg -y -i '{inst_wav}' -codec:a libmp3lame -b:a 192k '{os.path.join(output_dir, 'accompaniment.mp3')}' > /dev/null 2>&1")
+        if vocal_wav and os.path.exists(vocal_wav):
+            os.system(f"ffmpeg -y -i '{vocal_wav}' -codec:a libmp3lame -b:a 192k '{os.path.join(output_dir, 'vocals.mp3')}' > /dev/null 2>&1")
+    except Exception:
+        pass
+
     del vocal, vocal_clean, final_mix, clean_mix
     if inst is not None:
         del inst
