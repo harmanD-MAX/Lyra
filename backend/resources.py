@@ -120,7 +120,8 @@ _KEEP = {
     "meta.json", "pipeline_state.json",
     "master_remastered.mp3", "master_remastered.wav",
     "master_clean.mp3", "master_clean.wav",
-    "converted_vocals.wav", "vocal_processed.wav", "vocal_processed.mp3",
+    "converted_vocals.wav", "converted_vocals_untuned.wav", "converted_vocals_tuned.wav",
+    "vocal_processed.wav", "vocal_processed.mp3",
     "accompaniment.wav", "accompaniment.mp3", "instrumental.wav",
     "vocals.wav", "vocals.mp3", "input_audio.wav"
 }
