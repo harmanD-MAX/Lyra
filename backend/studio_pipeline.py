@@ -63,6 +63,7 @@ class JobParams:
     steadiness: float = 0.5
     vibrato: float = 0.0
     harmony: str = "none"
+    output_tune: str = "soulful"           # off | natural | soulful | strong (final tune on the converted vocal)
     # guide (my_voice)
     guide_source_type: Optional[str] = None  # file | youtube | spotify
     guide_file_path: Optional[str] = None
@@ -239,6 +240,23 @@ def _world_retune(src: str, out: str, pitch_options: Optional[dict], key, streng
     return voice_enhance.retune_world(src, out, correct, progress_cb=progress)
 
 
+def _final_tune(vocal_path: str, key, style: str, progress=None) -> Optional[dict]:
+    """Tune the converted vocal in place. Returns {f0, fps} or None when off or on failure."""
+    import voice_enhance
+    if style not in voice_enhance.OUTPUT_TUNE_STYLES:
+        return None
+    tmp = vocal_path.replace(".wav", "_final_tune.wav")
+    try:
+        r = voice_enhance.polish_output_pitch(vocal_path, tmp, key=key, style=style, progress_cb=progress)
+        os.replace(tmp, vocal_path)
+        return r
+    except Exception as e:
+        logger.warning(f"Final vocal tune skipped: {e}")
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        return None
+
+
 def _render(source: str, out_name: str, job_dir: str, p: "JobParams", model_info: dict, engine: str,
             pitch_options: Optional[dict], key, strength: float, guide_lead: Optional[str],
             harmony_degrees: int = 0, progress=None) -> dict:
@@ -372,6 +390,13 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
         if r["engine"] != engine:
             engine_reason = f"fell back from {engine}"
         f0, fps, engine = r["f0"], r["fps"], r["engine"]
+
+    # 6b. Final vocal tune on the converted output (the engine can drift off the melody or crack)
+    if not is_raw:
+        tuned = _final_tune(lead_out, key, p.output_tune, progress)
+        if tuned is not None:
+            f0, fps = tuned["f0"], tuned["fps"]
+            analysis["output_tune"] = p.output_tune
 
     # IMMEDIATELY UNLOAD NEURAL MODELS FROM RAM / VRAM AT 85%
     # HuBERT, RMVPE, and RVC Synthesizer weights (~2.5GB) are purged before mastering starts
@@ -519,6 +544,7 @@ def rerender_section(job_dir: str, start: float, end: float, overrides: dict,
     trimmed = out[int(lead_pad * osr): int((lead_pad + (end - start)) * osr)]
     trimmed_path = os.path.join(job_dir, "_section_trimmed.wav")
     sf.write(trimmed_path, trimmed, osr, subtype="PCM_24")
+    _final_tune(trimmed_path, tuple(state["key"]) if state.get("key") else None, p.output_tune)
 
     lead = os.path.join(job_dir, "converted_vocals.wav")
     _splice(lead, trimmed_path, start, end, lead)

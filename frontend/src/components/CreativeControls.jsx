@@ -210,6 +210,17 @@ export default function CreativeControls({ open, onClose, creative, setCreative,
                     <option value="rvc" disabled={voiceEngine && !voiceEngine.available?.rvc}>RVC v2 (40/48 kHz) — tightest pitch, cleanest audio</option>
                   </select>
                 </label>
+                {selectedModel !== 'raw' && (
+                  <label className="block text-xs sm:col-span-2">
+                    <span className="text-white/75">Final vocal tune</span>
+                    <select value={creative.outputTune} onChange={(e) => set({ outputTune: e.target.value })} className="mt-1.5 w-full bg-[#1a1d23] border border-white/10 rounded-lg px-2 py-2 text-sm">
+                      <option value="soulful">Soulful — in key, steady notes, vibrato on long notes</option>
+                      <option value="natural">Natural — light touch, fixes cracks</option>
+                      <option value="strong">Strong — locked on pitch</option>
+                      <option value="off">Off</option>
+                    </select>
+                  </label>
+                )}
                 <Slider label="Pitch correction" value={creative.correction} onChange={(v) => set({ correction: v })} />
                 <Slider label="Steadiness" value={creative.steadiness} onChange={(v) => set({ steadiness: v })} />
                 <Slider label="Vibrato" value={creative.vibrato} onChange={(v) => set({ vibrato: v })} />

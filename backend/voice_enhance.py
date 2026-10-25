@@ -151,3 +151,119 @@ def retune_world(
             sf.write(output_wav, y.astype(np.float32), sr, subtype="PCM_24")
 
         return {"path": output_wav, "f0": f0_new.astype(np.float32), "fps": fps}
+
+
+# ---------------------------------------------------------------------------
+# Final vocal tune: polish the converted vocal itself
+# ---------------------------------------------------------------------------
+
+# Seed-VC re-generates the voice, so its output can drift off the corrected
+# melody and crack on fast or high notes. These presets tune the output a
+# second time. Retune speed stays slow enough to keep slides and meend.
+OUTPUT_TUNE_STYLES = {
+    "natural": dict(strength=0.45, retune_ms=70.0, steadiness=0.30, vibrato=0.15),
+    "soulful": dict(strength=0.70, retune_ms=55.0, steadiness=0.50, vibrato=0.35),
+    "strong": dict(strength=0.95, retune_ms=25.0, steadiness=0.75, vibrato=0.20),
+}
+
+
+def repair_f0_cracks(f0: np.ndarray, fps: float) -> np.ndarray:
+    """
+    Fix pitch cracks in a voiced F0 curve: octave flips and short spikes that jump
+    far from the surrounding melody are pulled back onto it. Unvoiced frames stay 0.
+    """
+    from scipy.ndimage import median_filter
+
+    f0 = np.asarray(f0, dtype=np.float64)
+    voiced = f0 > 0
+    if voiced.sum() < 5:
+        return f0
+    midi = np.zeros_like(f0)
+    midi[voiced] = 69.0 + 12.0 * np.log2(f0[voiced] / 440.0)
+    idx = np.arange(len(f0))
+    filled = np.interp(idx, idx[voiced], midi[voiced])
+    ref = median_filter(filled, size=max(5, int(0.08 * fps) | 1), mode="nearest")
+
+    dev = midi - ref
+    fixed = midi.copy()
+    octave = voiced & (np.abs(dev) > 7.0)
+    fixed[octave] -= 12.0 * np.round(dev[octave] / 12.0)
+    still_off = voiced & (np.abs(fixed - ref) > 3.0)
+    fixed[still_off] = ref[still_off]
+    return np.where(voiced, 440.0 * 2.0 ** ((fixed - 69.0) / 12.0), 0.0)
+
+
+def _psola_retune(audio: np.ndarray, sr: int, f0_target: np.ndarray, fps: float) -> np.ndarray:
+    """Move the voiced pitch of `audio` (n, ch) onto `f0_target` with PSOLA. Timbre and breath are kept."""
+    import parselmouth
+    from parselmouth.praat import call
+
+    t_step = 1.0 / fps
+    channels = audio.shape[1]
+    if channels > 1 and np.allclose(audio[:, 0], audio[:, 1:].T, atol=1e-4):
+        audio = audio[:, :1]  # dual-mono: retune once, copy back to every channel
+    out = []
+    pitch_tier = None
+    for ch in range(audio.shape[1]):
+        snd = parselmouth.Sound(audio[:, ch].astype(np.float64), sampling_frequency=sr)
+        manip = call(snd, "To Manipulation", t_step, 60.0, 1100.0)
+        if pitch_tier is None:
+            pitch_tier = call(manip, "Extract pitch tier")
+            call(pitch_tier, "Remove points between", 0.0, snd.duration + 0.1)
+            for i, f in enumerate(f0_target):
+                if f > 0:
+                    call(pitch_tier, "Add point", float(i * t_step), float(f))
+        call([manip, pitch_tier], "Replace pitch tier")
+        out.append(call(manip, "Get resynthesis (overlap-add)").as_array()[0])
+    n = min(len(audio), *(len(y) for y in out))
+    y = np.zeros((len(audio), audio.shape[1]), dtype=np.float32)
+    y[:n] = np.column_stack([o[:n] for o in out])
+    return np.repeat(y, channels, axis=1) if y.shape[1] < channels else y
+
+
+def polish_output_pitch(
+    input_wav: str,
+    output_wav: str,
+    key=None,
+    style: str = "soulful",
+    progress_cb=None,
+) -> dict:
+    """
+    Final vocal tune on the converted vocal: repair pitch cracks, bring notes into
+    key, steady shaky held notes and bloom gentle vibrato on long notes.
+    Pitch is moved with PSOLA so the converted timbre is not re-synthesized.
+    Returns {"path", "f0", "fps"}.
+    """
+    import melody
+
+    settings = OUTPUT_TUNE_STYLES.get(style, OUTPUT_TUNE_STYLES["soulful"])
+    audio, sr = sf.read(input_wav, always_2d=True)
+    fps = 1000.0 / FRAME_PERIOD_MS
+
+    if progress_cb:
+        progress_cb(84, "Final vocal tune: repairing pitch cracks...")
+    f0 = analyse_f0(audio.mean(axis=1), sr)
+    repaired = repair_f0_cracks(f0, fps)
+    target = melody.correct_pitch(repaired, fps=fps, key=key, **settings).astype(np.float64)
+
+    # Never move a frame more than 2 semitones from what was sung (tracker errors)
+    voiced = (repaired > 0) & (target > 0)
+    ratio = np.ones_like(target)
+    ratio[voiced] = np.clip(target[voiced] / repaired[voiced], 2 ** (-2 / 12), 2 ** (2 / 12))
+    target = np.where(voiced, repaired * ratio, 0.0)
+
+    if progress_cb:
+        progress_cb(85, f"Final vocal tune ({style}): in key, steady notes, vibrato on long notes...")
+    try:
+        y = _psola_retune(audio, sr, target, fps)
+    except Exception as e:
+        logger.info(f"PSOLA retune unavailable ({e}); using WORLD for the final tune")
+        return retune_world(input_wav, output_wav,
+                            lambda f, _fps: melody.correct_pitch(repair_f0_cracks(f, _fps), fps=_fps, key=key, **settings),
+                            smooth_tone=0.0)
+
+    peak = float(np.max(np.abs(y))) + 1e-9
+    if peak > 0.98:
+        y = y / peak * 0.95
+    sf.write(output_wav, y, sr, subtype="PCM_24")
+    return {"path": output_wav, "f0": target.astype(np.float32), "fps": fps}
