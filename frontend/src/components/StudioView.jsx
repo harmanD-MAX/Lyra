@@ -8,7 +8,7 @@ import {
   Sliders, CheckCircle2, AlertCircle,
   ChevronDown, ChevronUp, Disc, Loader2, X, RefreshCw,
   PlusCircle, Trash2, Check, Cloud, Headphones,
-  Cpu, HardDrive, Layers, FileAudio, Square, User, Zap, Waves, Menu
+  Cpu, HardDrive, Layers, FileAudio, Square, User, Zap, Waves, Menu, LogOut
 } from 'lucide-react';
 import ProcessingStatus from './ProcessingStatus';
 import ComposerTools from './ComposerTools';
@@ -1232,15 +1232,27 @@ export default function StudioView({
           </nav>
 
           {auth?.user ? (
-            <div className="panel-inset p-2.5 flex items-center gap-2.5">
-              <AccountMenu user={auth.user} onSignOut={auth.signOut} onOpenSongs={() => { setActiveTab('my-songs'); setMobileNavOpen(false); }} align="left" />
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-semibold text-white truncate">{auth.user.name || 'Signed in'}</div>
-                <div className="text-[10px] text-white/45 truncate">{auth.user.email}</div>
+            <div className="panel-inset p-3 space-y-2.5">
+              <div className="flex items-center gap-2.5">
+                <AccountMenu user={auth.user} onSignOut={auth.signOut} onOpenSongs={() => { setActiveTab('my-songs'); setMobileNavOpen(false); }} align="left" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-semibold text-white truncate">{auth.user.name || 'Signed in'}</div>
+                  <div className="text-[10px] text-white/45 truncate">{auth.user.email}</div>
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={auth.signOut}
+                className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-rose-300/90 hover:text-rose-100 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition-all cursor-pointer"
+                title="Sign out of your account"
+              >
+                <LogOut className="w-3.5 h-3.5" /> Log out
+              </button>
             </div>
-          ) : auth && !auth.enabled && onLogin ? (
-            <button type="button" onClick={onLogin} className="btn btn-secondary w-full">Log in</button>
+          ) : auth?.enabled && onLogin ? (
+            <button type="button" onClick={onLogin} className="btn btn-secondary w-full flex items-center justify-center gap-2 text-xs">
+              Log in with Google
+            </button>
           ) : null}
 
           {/* Now playing mini card */}
