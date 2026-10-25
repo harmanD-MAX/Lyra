@@ -344,7 +344,7 @@ export default function App() {
           initialTab={studioTab}
           auth={auth}
           onLogin={openLogin}
-          onSongsChanged={fetchRecentJobs}
+          onRefreshJobs={fetchRecentJobs}
         />
       )}
 
