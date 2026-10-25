@@ -1237,33 +1237,72 @@ async def quick_remix(
     if not job or job.get("status") != "completed":
         raise HTTPException(status_code=400, detail="Job must be completed before remixing.")
 
+    drive_folder = (job.get("results") or {}).get("drive_folder") if job else None
     job_dir = os.path.join(OUTPUTS_DIR, job_id)
     if not os.path.isdir(job_dir):
         for cand_dir in [
+            drive_folder,
+            os.path.join(OUTPUTS_DIR, ".internal_jobs", job_id),
             os.path.join(BASE_DIR, "outputs", job_id),
             os.path.join("/content/drive/MyDrive/lyra-songs", job_id),
+            os.path.join("/content/drive/MyDrive/lyra-songs", ".internal_jobs", job_id),
             os.path.join("/content/drive/MyDrive/ysra-songs", job_id)
         ]:
-            if os.path.isdir(cand_dir):
+            if cand_dir and os.path.isdir(cand_dir):
                 job_dir = cand_dir
                 break
-    
-    # Locate the dry rendered vocal (pitch is already corrected on the F0 curve)
-    vocal_path = None
-    for candidate in ["vocals_with_harmony.wav", "converted_vocals.wav", "arijit_vocals.wav", "vocal_autotuned.wav", "vocals.wav"]:
-        p = os.path.join(job_dir, candidate)
-        if os.path.exists(p):
-            vocal_path = p
-            break
 
-    inst_path = os.path.join(job_dir, "instrumental.wav")
-    for candidate in ["accompaniment.wav", os.path.join("guide", "accompaniment.wav"), "instrumental.wav"]:
-        if os.path.exists(os.path.join(job_dir, candidate)):
-            inst_path = os.path.join(job_dir, candidate)
+    # Locate the vocal stem across all candidate names and locations
+    vocal_candidates = [
+        "converted_vocals.wav",
+        "vocal_processed.wav",
+        "03 - Lead Vocal (Polished AI Stem).wav",
+        "vocals_with_harmony.wav",
+        "arijit_vocals.wav",
+        "vocal_autotuned.wav",
+        "vocals_lead_dry.wav",
+        "vocals.wav",
+        "input_audio.wav"
+    ]
+    vocal_path = None
+    for d in [job_dir, drive_folder]:
+        if d and os.path.isdir(d):
+            for candidate in vocal_candidates:
+                p = os.path.join(d, candidate)
+                if os.path.exists(p) and os.path.getsize(p) > 100:
+                    vocal_path = p
+                    break
+            if vocal_path:
+                break
+
+    # Locate the instrumental backing track
+    inst_candidates = [
+        "accompaniment.wav",
+        "04 - Backing Track (Instrumental Stem).wav",
+        os.path.join("guide", "accompaniment.wav"),
+        "instrumental.wav"
+    ]
+    inst_path = None
+    for d in [job_dir, drive_folder]:
+        if d and os.path.isdir(d):
+            for candidate in inst_candidates:
+                p = os.path.join(d, candidate)
+                if os.path.exists(p) and os.path.getsize(p) > 100:
+                    inst_path = p
+                    break
+            if inst_path:
+                break
+
+    raw_vocal_path = None
+    for cand in ["vocals_lead_dry.wav", "05 - Original Input Vocal.wav", "vocals.wav", "input_audio.wav"]:
+        for d in [job_dir, drive_folder]:
+            if d and os.path.isdir(d):
+                p = os.path.join(d, cand)
+                if os.path.exists(p) and os.path.getsize(p) > 100:
+                    raw_vocal_path = p
+                    break
+        if raw_vocal_path:
             break
-    raw_vocal_path = os.path.join(job_dir, "vocals_lead_dry.wav")
-    if not os.path.exists(raw_vocal_path):
-        raw_vocal_path = os.path.join(job_dir, "vocals.wav")
 
     if not vocal_path:
         raise HTTPException(status_code=404, detail="Vocal stem missing")
@@ -1271,9 +1310,9 @@ async def quick_remix(
     # Re-run master with instant acoustics & balance (< 1 second)
     audio_processor.master_and_remaster_track(
         vocal_wav=vocal_path,
-        inst_wav=inst_path if os.path.exists(inst_path) else None,
+        inst_wav=inst_path if (inst_path and os.path.exists(inst_path)) else None,
         output_dir=job_dir,
-        raw_vocal_wav=raw_vocal_path if os.path.exists(raw_vocal_path) else None,
+        raw_vocal_wav=raw_vocal_path if (raw_vocal_path and os.path.exists(raw_vocal_path)) else None,
         vocal_gain_db=vocal_gain_db,
         inst_gain_db=inst_gain_db,
         reverb_amount=reverb_amount,
@@ -1282,8 +1321,24 @@ async def quick_remix(
         clarity=clarity,
         apply_autotune=False,
         center_anchor=center_anchor,
-        presence_boost_db=presence_boost_db
+        presence_boost_db=presence_boost_db,
+        is_quick_remix=True
     )
+
+    # Sync updated master stems to Google Drive if configured
+    if drive_folder and os.path.isdir(drive_folder):
+        try:
+            for s_name, d_name in [
+                ("master_remastered.mp3", "01 - Master 3D (Spatial Remaster).mp3"),
+                ("master_remastered.wav", "01 - Master 3D (Lossless 24-bit).wav"),
+                ("vocal_processed.wav", "03 - Lead Vocal (Polished AI Stem).wav")
+            ]:
+                s_p = os.path.join(job_dir, s_name)
+                d_p = os.path.join(drive_folder, d_name)
+                if os.path.exists(s_p) and os.path.abspath(s_p) != os.path.abspath(d_p):
+                    shutil.copy2(s_p, d_p)
+        except Exception as e:
+            logger.warning(f"Could not sync remixed stems to Google Drive: {e}")
 
     now_ts = int(time.time() * 1000)
     return JSONResponse(content={
