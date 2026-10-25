@@ -28,16 +28,18 @@ cd backend && python -m uvicorn app:app --port 8000
 cd frontend && npm run dev   # http://localhost:3000
 ```
 
-## Accounts (Google sign-in + Cloudflare D1)
+## Accounts (Sign in with Google + Cloudflare D1)
 
-Sign-in is off until both Google and D1 are configured. Once on, the studio asks people to sign in with Google, and **My Songs** only lists the songs saved by that account. Accounts and song ownership live in Cloudflare D1; the audio stays in R2.
+Sign-in is off until both Firebase and D1 are configured. Once on, the **Log in** button opens Google sign-in, and **My Songs** lists every song that account saved. Firebase Authentication only runs the Google popup (free Spark plan, no Google Cloud Console setup). The accounts and the list of who owns which song live in Cloudflare D1, and the audio stays in R2.
 
-1. Create the database: `npx wrangler d1 create lyra-db`, and copy its `database_id`.
-2. Create a Cloudflare API token with **Account → D1 → Edit** permission.
-3. In Google Cloud Console → APIs & Services → Credentials, create an **OAuth client ID** (type *Web application*). Add every origin you open Lyra from under **Authorized JavaScript origins**, e.g. `http://localhost:8000`, `http://localhost:3000` and `https://lyra-studio.loca.lt`.
-4. Copy `backend/.env.example` to `backend/.env` and fill in `CF_D1_DATABASE_ID`, `CF_API_TOKEN`, `GOOGLE_CLIENT_ID` and `LYRA_SESSION_SECRET`.
+1. **D1:** run `npx wrangler d1 create lyra-db` and copy its `database_id`. Then create a Cloudflare API token with **Account → D1 → Edit** permission.
+2. **Firebase:** at [console.firebase.google.com](https://console.firebase.google.com), create a project (you can turn Google Analytics off). Then:
+   - In **Authentication → Sign-in method**, turn on **Google**.
+   - In **Authentication → Settings → Authorized domains**, add the addresses you open Lyra from, e.g. `lyra-studio.loca.lt` (`localhost` is already there).
+   - In **Project settings → Your apps**, add a **Web app** and copy its `apiKey`, `authDomain`, `projectId` and `appId`.
+3. Copy `backend/.env.example` to `backend/.env` and fill in the D1, Firebase and `LYRA_SESSION_SECRET` values.
 
-The backend creates the tables on startup (the same schema is in `cloudflare/schema.sql`). Songs saved before sign-in was turned on have no owner, so they no longer show in My Songs.
+The backend creates the tables on startup; the same schema is in `cloudflare/schema.sql`. Songs saved before sign-in was turned on have no owner, so they don't show in anyone's My Songs.
 
 ## Voice engines
 
