@@ -28,9 +28,12 @@ CF_API_TOKEN = os.environ.get("CF_API_TOKEN") or _FALLBACK_CF_TOKEN
 SCHEMA = [
     """CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
-        email TEXT NOT NULL UNIQUE,
+        uid TEXT,
+        email TEXT NOT NULL,
         name TEXT,
+        display_name TEXT,
         picture TEXT,
+        photo_url TEXT,
         created_at INTEGER NOT NULL,
         last_login_at INTEGER NOT NULL
     )""",
@@ -75,12 +78,16 @@ def init_schema() -> bool:
     try:
         for stmt in SCHEMA:
             query(stmt)
-        # Databases created before songs.data existed
+        # Ensure any additional columns exist
+        for col in ["id", "uid", "name", "display_name", "picture", "photo_url"]:
+            try:
+                query(f"ALTER TABLE users ADD COLUMN {col} TEXT")
+            except RuntimeError:
+                pass
         try:
             query("ALTER TABLE songs ADD COLUMN data TEXT")
-        except RuntimeError as e:
-            if "duplicate column" not in str(e).lower():
-                raise
+        except RuntimeError:
+            pass
         return True
     except Exception as e:
         logger.error(f"Failed to initialise D1 schema: {e}")
@@ -90,18 +97,29 @@ def init_schema() -> bool:
 def upsert_user(user_id: str, email: str, name: str, picture: str) -> dict:
     now = int(time.time())
     query(
-        """INSERT INTO users (id, email, name, picture, created_at, last_login_at)
-           VALUES (?, ?, ?, ?, ?, ?)
+        """INSERT INTO users (id, uid, email, name, display_name, picture, photo_url, created_at, last_login_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
-             email = excluded.email, name = excluded.name,
-             picture = excluded.picture, last_login_at = excluded.last_login_at""",
-        [user_id, email, name, picture, now, now],
+             uid = excluded.uid,
+             email = excluded.email,
+             name = excluded.name,
+             display_name = excluded.display_name,
+             picture = excluded.picture,
+             photo_url = excluded.photo_url,
+             last_login_at = excluded.last_login_at""",
+        [user_id, user_id, email, name, name, picture, picture, now, now],
     )
     return {"id": user_id, "email": email, "name": name, "picture": picture}
 
 
 def get_user(user_id: str) -> Optional[dict]:
-    rows = query("SELECT id, email, name, picture FROM users WHERE id = ?", [user_id])
+    rows = query(
+        """SELECT COALESCE(id, uid) AS id, email,
+                  COALESCE(name, display_name) AS name,
+                  COALESCE(picture, photo_url) AS picture
+           FROM users WHERE id = ? OR uid = ?""",
+        [user_id, user_id],
+    )
     return rows[0] if rows else None
 
 
