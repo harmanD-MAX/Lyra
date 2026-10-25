@@ -17,10 +17,10 @@ logger = logging.getLogger("lyra_auth")
 # Firebase Authentication handles "Sign in with Google" (free, no Google Cloud Console setup).
 # These web-app values are public; they're served to the browser by /api/auth/config.
 FIREBASE_CONFIG = {
-    "apiKey": os.environ.get("FIREBASE_API_KEY", ""),
-    "authDomain": os.environ.get("FIREBASE_AUTH_DOMAIN", ""),
-    "projectId": os.environ.get("FIREBASE_PROJECT_ID", ""),
-    "appId": os.environ.get("FIREBASE_APP_ID", ""),
+    "apiKey": os.environ.get("FIREBASE_API_KEY", "AIzaSyCuMgIiJKpBGCkpuW-GR4lPg7oUBvAHI2s"),
+    "authDomain": os.environ.get("FIREBASE_AUTH_DOMAIN", "lyra-3db8f.firebaseapp.com"),
+    "projectId": os.environ.get("FIREBASE_PROJECT_ID", "lyra-3db8f"),
+    "appId": os.environ.get("FIREBASE_APP_ID", "1:577932462728:web:9146d4bdde2f1d8e47ad3d"),
 }
 SESSION_COOKIE = "lyra_session"
 SESSION_TTL = 30 * 24 * 3600
