@@ -28,7 +28,6 @@ const STEMS = [
   { id: 'master', label: 'Master 3D', hint: 'Full 3D spatial remaster' },
   { id: 'vocal_arijit', label: 'Solo vocal', hint: 'Converted vocal only' },
   { id: 'instrumental', label: 'Instrumental', hint: 'Isolated backing track' },
-  { id: 'vocal_original', label: 'Original', hint: 'Your original input vocal' },
 ];
 
 const WAVE = [
@@ -303,7 +302,7 @@ export default function StudioView({
   const stemAudiosRef = useRef({});
   const fileInputRef = useRef(null);
 
-  const STEM_KEYS = ['master', 'vocal_arijit', 'instrumental', 'vocal_original'];
+  const STEM_KEYS = ['master', 'vocal_arijit', 'instrumental'];
 
   // When job completes or changes, auto-load track
   const currentResults = currentJob?.results;
@@ -2176,8 +2175,8 @@ export default function StudioView({
                       <div className="mt-auto hidden lg:block panel-inset p-4">
                         <div className="eyebrow !text-[10px] text-white/40">Every render includes</div>
                         <div className="mt-3 flex flex-wrap gap-1.5">
-                          {['Master 3D', 'Clean Natural', 'Solo vocal', 'Instrumental', 'Original', 'MIDI', 'Key & BPM'].map((t, i) => (
-                            <span key={t} className={`chip ${i < 2 ? 'chip-gold' : i > 4 ? 'chip-teal' : ''}`}>{t}</span>
+                          {['Master 3D', 'Clean Natural', 'Solo vocal', 'Instrumental', 'MIDI', 'Key & BPM'].map((t, i) => (
+                            <span key={t} className={`chip ${i < 2 ? 'chip-gold' : i > 3 ? 'chip-teal' : ''}`}>{t}</span>
                           ))}
                         </div>
                       </div>
