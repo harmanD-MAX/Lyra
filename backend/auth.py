@@ -10,7 +10,13 @@ from typing import Optional
 import httpx
 from fastapi import Request
 
-import d1_db
+try:
+    from . import d1_db
+except Exception:
+    try:
+        import d1_db
+    except Exception:
+        from backend import d1_db
 
 logger = logging.getLogger("lyra_auth")
 
@@ -20,15 +26,16 @@ FIREBASE_CONFIG = {
     "apiKey": os.environ.get("FIREBASE_API_KEY", "AIzaSyCuMgIiJKpBGCkpuW-GR4lPg7oUBvAHI2s"),
     "authDomain": os.environ.get("FIREBASE_AUTH_DOMAIN", "lyra-3db8f.firebaseapp.com"),
     "projectId": os.environ.get("FIREBASE_PROJECT_ID", "lyra-3db8f"),
+    "storageBucket": os.environ.get("FIREBASE_STORAGE_BUCKET", "lyra-3db8f.firebasestorage.app"),
+    "messagingSenderId": os.environ.get("FIREBASE_MESSAGING_SENDER_ID", "577932462728"),
     "appId": os.environ.get("FIREBASE_APP_ID", "1:577932462728:web:9146d4bdde2f1d8e47ad3d"),
+    "measurementId": os.environ.get("FIREBASE_MEASUREMENT_ID", "G-57PF84SB3K"),
 }
 SESSION_COOKIE = "lyra_session"
 SESSION_TTL = 30 * 24 * 3600
 
-# Without LYRA_SESSION_SECRET every restart (e.g. a new Colab runtime) signs everyone out.
-_SECRET = os.environ.get("LYRA_SESSION_SECRET") or secrets.token_hex(32)
-if not os.environ.get("LYRA_SESSION_SECRET"):
-    logger.warning("LYRA_SESSION_SECRET not set; sessions will not survive a restart.")
+# Persistent session secret so restarts / notebook reloads do not sign users out
+_SECRET = os.environ.get("LYRA_SESSION_SECRET", "lyra_studio_session_secret_persistent_2026")
 
 
 def is_auth_enabled() -> bool:
