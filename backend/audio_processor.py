@@ -1033,7 +1033,7 @@ def export_clean_unremastered_master(
     Produces a 100% Pure, Unremastered Natural Master:
     - Zero remastering: 0% hall reverb, 0% delay/echo, 0% 3D spatial widening, 0% backing ducking
     - Pure converted vocal stem blended naturally with original backing instrumental
-    - True peak limiter normalization (-0.5 dBFS) to prevent digital clipping
+    - Streaming master: -14 LUFS integrated with a -1 dBTP true-peak limiter
     - Exports master_clean.wav (24-bit PCM) and master_clean.mp3 (320kbps)
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -1105,13 +1105,8 @@ def export_clean_unremastered_master(
     else:
         mix = vocal
 
-    # True peak normalization (-0.5 dBFS)
-    peak = np.max(np.abs(mix)) + 1e-7
-    target_peak = 0.94
-    if peak > target_peak:
-        mix = np.tanh(mix / target_peak) * target_peak
-    else:
-        mix = (mix / peak) * target_peak
+    # Streaming master: -14 LUFS integrated, -1 dBTP true-peak ceiling
+    mix = master_for_streaming(mix, target_sr)
 
     clean_opus = os.path.join(output_dir, "master_clean.opus")
     sf.write(clean_wav, mix, target_sr, subtype="PCM_24")
@@ -1143,9 +1138,8 @@ def master_and_remaster_track(
     Dolby 3D Audio & Grand Hall Orchestra Master Engine (Auto-Applied):
     - Lead Vocal Focus (+2.5dB Boost) with pure Hindi lyric diction & sur tracking
     - Reduced Backing Music (-4.5dB Pocket) with intelligent Mid/Side sidechain ducking
-    - Dynamic Word-by-Word 3D Spatializer (Binaural Haas & 360-degree orbital motion on every sung syllable)
-    - Grand Hall Orchestra Goonj (Lush Royal Concert Hall reverberation & acoustic resonance)
-    - Master Limiter & Normalization (-14 LUFS broadcast standard / -0.5 dBFS true peak)
+    - Hall reverb and stereo depth on a send only: the dry lead stays mono, centred and untouched
+    - Streaming master (-14 LUFS integrated / -1 dBTP true peak)
     """
     os.makedirs(output_dir, exist_ok=True)
     master_wav = os.path.join(output_dir, "master_remastered.wav")
@@ -1201,7 +1195,7 @@ def master_and_remaster_track(
     # Keep a copy of pure clean vocal (0 reverb, 0 echo delay, 0 artificial stereo Haas)
     vocal_clean = vocal.copy()
 
-    # 2. Add Dolby 3D Spatial Audio & Grand Hall Orchestra Goonj (only when applied via Remaster button)
+    # 2. Hall reverb / stereo depth as a send (only when applied via the Remaster rack)
     if reverb_amount > 0.02 or echo_amount > 0.02:
         if progress_cb:
             progress_cb(92, "Applying 3D Dolby spatialization on singing words & Grand Hall Orchestra reverb...")
@@ -1278,23 +1272,12 @@ def master_and_remaster_track(
         final_mix = vocal
         clean_mix = vocal_clean
 
-    # Master Limiter & Normalization (-14 LUFS target / peak -0.5 dBFS)
+    # Streaming master: -14 LUFS integrated, -1 dBTP true-peak ceiling
     if progress_cb:
-        progress_cb(97, "Applying master bus optical compressor & true-peak limiter...")
+        progress_cb(97, "Mastering for streaming (-14 LUFS, -1 dBTP true-peak limiter)...")
 
-    peak = np.max(np.abs(final_mix)) + 1e-7
-    target_peak = 0.94 # -0.5 dBFS
-    if peak > target_peak:
-        final_mix = np.tanh(final_mix / target_peak) * target_peak
-    else:
-        final_mix = (final_mix / peak) * target_peak
-
-    # Also normalize clean natural master
-    peak_clean = np.max(np.abs(clean_mix)) + 1e-7
-    if peak_clean > target_peak:
-        clean_mix = np.tanh(clean_mix / target_peak) * target_peak
-    else:
-        clean_mix = (clean_mix / peak_clean) * target_peak
+    final_mix = master_for_streaming(final_mix, target_sr)
+    clean_mix = master_for_streaming(clean_mix, target_sr)
 
     # Export lossless 24-bit WAVs
     sf.write(master_wav, final_mix, target_sr, subtype="PCM_24")
@@ -1357,20 +1340,16 @@ def _apply_dolby_3d_spatial_and_hall_goonj(
     presence_boost_db: float = 2.8
 ) -> np.ndarray:
     """
-    Dolby 3D Audio & Grand Hall Orchestra Goonj Engine (Refined & Tamed - 30% further reduction):
-    1. Direct Center Channel Anchor:
-       Preserves dead-center lead vocal presence for 100% Hindi diction & sur clarity.
-       Lead vocals remain stationary and pristine in the center of the soundstage.
-    2. Ultra-Subtle 3D Stereo Spatializer (Stable Lyrics & Maximum Clarity):
-       - Gentle Haas micro-delays (11.5ms L / 17.8ms R) with transparent side width.
-         Transient bursts tamed so lyrics remain crystal clear and firmly center-anchored.
-       - Stationary low-level ambient acoustic reflections (95ms, 185ms, 275ms) without circular panning.
-       - Bandpass filtering (200 Hz - 3600 Hz) with soft saturation for smooth acoustic cushion.
-    3. Grand Hall Orchestra Goonj (भव्य कॉन्सर्ट हॉल और सिम्फनी ऑर्केस्ट्रा की गूँज):
-       - Ultra-soft, delicate late diffusion tail (reduced by further 30%) for intimate hall depth.
-       - High-cut absorption damping at 4.5kHz to prevent clutter or splash behind singing words.
-    4. Lead Vocal Presence:
-       - Upper-mid presence lift (+2.8dB at 2.8kHz - 4.8kHz) for crystal clear lyric intelligibility.
+    Send-style vocal space that keeps the singer's real tone:
+    1. The dry lead vocal is never filtered, delayed or widened. It stays mono and dead-centre,
+       so the timbre matches the Clean Natural master exactly.
+    2. Hall reverb runs on a separate send: band-limited (180 Hz - 7 kHz), 40 ms pre-delay so the
+       dry consonants stay in front, and ducked while the singer is singing so the tail fills the
+       gaps between phrases instead of smearing the words.
+    3. `echo_amount` (Stereo depth) adds a few early reflections to the send and widens only the
+       wet return. No Haas delay is ever applied to the lead.
+    `center_anchor` and `presence_boost_db` are kept for API compatibility; they used to colour the
+    lead and are no longer applied.
     """
     if vocal.ndim == 1:
         vocal = np.column_stack([vocal, vocal])
@@ -1380,114 +1359,160 @@ def _apply_dolby_3d_spatial_and_hall_goonj(
         vocal = vocal[:, :2]
 
     n_samples = len(vocal)
-    out_vocal = vocal.astype(np.float32).copy()
+    dry = vocal.astype(np.float32)
+    if reverb_amount <= 0.01 and echo_amount <= 0.01:
+        return dry.copy()
 
-    # --- 1. DIRECT CENTER CHANNEL ANCHOR (DEAD-CENTER VOCAL PRESENCE & SUR CLARITY) ---
-    if center_anchor > 0.01:
-        lead_center = (vocal[:, 0] + vocal[:, 1]) * 0.5
-        center_reinforce = lead_center * (0.32 * min(1.0, max(0.0, center_anchor)))
-        out_vocal[:, 0] += center_reinforce
-        out_vocal[:, 1] += center_reinforce
+    v_mono = ((dry[:, 0] + dry[:, 1]) * 0.5).astype(np.float32)
 
-    # --- 1. SUBTLE 3D SPATIALIZER (TAMED FOR STABLE LYRICS & VOCAL PRIORITY) ---
+    # Send EQ: keep rumble, chest boom and sibilance out of the effects
+    sos_send = signal.butter(2, [180, 7000], 'bandpass', fs=sr, output='sos')
+    send = signal.sosfilt(sos_send, v_mono).astype(np.float32)
+
+    wet = np.zeros((n_samples, 2), dtype=np.float32)
+
+    # --- Early reflections (Stereo depth): on the send only, never on the dry lead ---
     if echo_amount > 0.01:
-        v_mono = (vocal[:, 0] + vocal[:, 1]) * 0.5
-        # Smooth envelope follower with gentle transient scaling (avoid sudden jumps in lyrics)
-        env_smooth = uniform_filter1d(np.abs(v_mono), size=int(sr * 0.04))
-        word_dynamic = np.clip(env_smooth * 1.5, 0.0, 0.30).astype(np.float32)
-
-        # Gentle Haas 3D Side-Spread (11.5ms L, 17.8ms R) - transparent low gain for subtle width
-        d_l = int(sr * 0.0115)
-        d_r = int(sr * 0.0178)
-        haas_buf = np.zeros_like(vocal, dtype=np.float32)
-        if d_l < n_samples:
-            haas_buf[d_l:, 0] = v_mono[:-d_l] * (0.08 + 0.05 * word_dynamic[:-d_l])
-        if d_r < n_samples:
-            haas_buf[d_r:, 1] = v_mono[:-d_r] * (0.08 + 0.05 * word_dynamic[:-d_r])
-
-        # Pinna HRTF head-shadow filter: soft low-pass at 4000Hz
-        sos_pinna = signal.butter(2, 4000, 'lp', fs=sr, output='sos')
-        haas_buf[:, 0] = signal.sosfilt(sos_pinna, haas_buf[:, 0])
-        haas_buf[:, 1] = signal.sosfilt(sos_pinna, haas_buf[:, 1])
-
-        # Stationary subtle ambient reflections (avoid dizzying circular rotation across lyrics)
-        echo_buf = np.zeros_like(vocal, dtype=np.float32)
         ambient_taps = [
-            (0.095, 0.11, 0.65, 0.35),  # Gentle Left-biased reflection
-            (0.185, 0.08, 0.35, 0.65),  # Gentle Right-biased reflection
-            (0.275, 0.04, 0.50, 0.50)   # Soft center-wide tail
+            (0.029, 0.30, 0.75, 0.25),
+            (0.047, 0.24, 0.25, 0.75),
+            (0.083, 0.16, 0.60, 0.40),
+            (0.131, 0.10, 0.40, 0.60),
         ]
-
         for d_sec, gain, pan_l, pan_r in ambient_taps:
             d_s = int(sr * d_sec)
             if d_s < n_samples:
-                tap_audio = v_mono[:-d_s] * gain
-                echo_buf[d_s:, 0] += tap_audio * pan_l
-                echo_buf[d_s:, 1] += tap_audio * pan_r
+                tap = send[:-d_s] * (gain * echo_amount * 2.2)
+                wet[d_s:, 0] += tap * pan_l
+                wet[d_s:, 1] += tap * pan_r
 
-        # Warm analog bandpass filter (200 Hz - 3600 Hz)
-        sos_echo_bp = signal.butter(2, [200, 3600], 'bandpass', fs=sr, output='sos')
-        echo_buf[:, 0] = signal.sosfilt(sos_echo_bp, echo_buf[:, 0])
-        echo_buf[:, 1] = signal.sosfilt(sos_echo_bp, echo_buf[:, 1])
-
-        # Combine spatial ambient cushion (reduced by further 30%)
-        spatial_total = haas_buf * 0.40 + echo_buf * 0.40
-        spatial_total = np.tanh(spatial_total * 1.05) / 1.05
-        out_vocal += (echo_amount * 0.40) * spatial_total
-        del echo_buf, haas_buf, spatial_total
-
-    # --- 2. GRAND HALL ORCHESTRA GOONJ (भव्य कॉन्सर्ट हॉल और सिम्फनी ऑर्केस्ट्रा की गूँज - FURTHER 30% REDUCTION) ---
+    # --- Hall reverb: 40 ms pre-delay, warm damping ---
     if reverb_amount > 0.01:
-        hall_goonj = np.zeros_like(vocal, dtype=np.float32)
         try:
             ir = _get_or_create_hall_ir(sr=sr, duration=2.4)
             if ir is not None and len(ir) > 0:
-                hall_l = signal.fftconvolve(vocal[:, 0].astype(np.float32), ir[:, 0].astype(np.float32), mode='full')[:n_samples]
-                hall_r = signal.fftconvolve(vocal[:, 1].astype(np.float32), ir[:, 1].astype(np.float32), mode='full')[:n_samples]
-                hall_goonj[:, 0] = hall_l
-                hall_goonj[:, 1] = hall_r
-                del hall_l, hall_r
+                pre = int(sr * 0.040)
+                delayed = np.zeros(n_samples, dtype=np.float32)
+                if pre < n_samples:
+                    delayed[pre:] = send[:-pre] if pre > 0 else send
+                hall = np.zeros((n_samples, 2), dtype=np.float32)
+                hall[:, 0] = signal.fftconvolve(delayed, ir[:, 0].astype(np.float32), mode='full')[:n_samples]
+                hall[:, 1] = signal.fftconvolve(delayed, ir[:, 1].astype(np.float32), mode='full')[:n_samples]
+                # Gentle low-mid body on the tail only (never on the lead)
+                sos_warmth = signal.butter(2, [240, 480], 'bandpass', fs=sr, output='sos')
+                hall += signal.sosfilt(sos_warmth, hall, axis=0).astype(np.float32) * (0.16 * warmth)
+                sos_hall_damp = signal.butter(2, 4500, 'lp', fs=sr, output='sos')
+                hall = signal.sosfilt(sos_hall_damp, hall, axis=0).astype(np.float32)
+                # IR is energy-normalised per second; rescale to unit energy so 5% reverb sits
+                # about -18 dB under the dry lead (25% ~ -4 dB)
+                hall /= math.sqrt(sr)
+                wet += hall * (reverb_amount * 2.4)
+                del hall, delayed
         except (MemoryError, Exception) as conv_err:
             logger.warning(f"Convolution reverb memory fallback: {conv_err}")
 
-        # Warm Symphony Orchestra EQ: subtle body warmth at 300Hz
-        try:
-            sos_warmth = signal.butter(2, [240, 480], 'bandpass', fs=sr, output='sos')
-            hall_goonj[:, 0] += signal.sosfilt(sos_warmth, hall_goonj[:, 0]) * (0.16 * warmth)
-            hall_goonj[:, 1] += signal.sosfilt(sos_warmth, hall_goonj[:, 1]) * (0.16 * warmth)
-        except Exception:
-            pass
+    # Duck the wet return while the singer is singing (up to -6 dB), release into the gaps
+    env = uniform_filter1d(np.abs(v_mono), size=int(sr * 0.05))
+    env_ref = np.percentile(env, 95) + 1e-7
+    duck = 1.0 - 0.5 * np.clip(env / env_ref, 0.0, 1.0)
+    duck = uniform_filter1d(duck, size=int(sr * 0.12)).astype(np.float32)
+    wet *= duck[:, None]
 
-        # High-cut absorption damping to keep the hall reverb warm and silky without masking diction
-        sos_hall_damp = signal.butter(2, 4500, 'lp', fs=sr, output='sos')
-        hall_goonj[:, 0] = signal.sosfilt(sos_hall_damp, hall_goonj[:, 0])
-        hall_goonj[:, 1] = signal.sosfilt(sos_hall_damp, hall_goonj[:, 1])
+    # Width lives in the wet return only: scale its side signal with Stereo depth
+    width = 1.0 + 4.0 * min(max(echo_amount, 0.0), 0.15)
+    w_mid = (wet[:, 0] + wet[:, 1]) * 0.5
+    w_side = (wet[:, 0] - wet[:, 1]) * 0.5 * width
+    wet[:, 0] = w_mid + w_side
+    wet[:, 1] = w_mid - w_side
 
-        # Mix Grand Hall Orchestra Goonj (further 30% reduction)
-        out_vocal += (reverb_amount * 0.17) * hall_goonj
-        del hall_goonj
+    out_vocal = dry + wet
+    del wet, send
 
-    # --- 3. VOCAL PRESENCE & CLARITY LIFT (MAXIMUM VOCAL PRIORITY) ---
-    # Focus lead vocals: Upper-mid presence lift (+2.8dB at 2.8kHz - 4.8kHz)
-    try:
-        sos_pres = signal.butter(2, [2800, 4800], 'bandpass', fs=sr, output='sos')
-        pres_l = signal.sosfilt(sos_pres, out_vocal[:, 0])
-        pres_r = signal.sosfilt(sos_pres, out_vocal[:, 1])
-        if presence_boost_db > 0.01:
-            pres_factor = (10.0 ** (presence_boost_db / 20.0) - 1.0)
-        else:
-            pres_factor = 0.28 * clarity
-        out_vocal[:, 0] += pres_l * pres_factor
-        out_vocal[:, 1] += pres_r * pres_factor
-    except Exception:
-        pass
-
-    # Peak-control wet vocal
     v_peak = np.max(np.abs(out_vocal)) + 1e-7
-    if v_peak > 0.96:
-        out_vocal = out_vocal / v_peak * 0.94
+    if v_peak > 0.99:
+        out_vocal = out_vocal / v_peak * 0.99
 
     return out_vocal
+
+
+def _biquad_k_weighting(sr: int) -> np.ndarray:
+    """ITU-R BS.1770-4 K-weighting (high shelf + high pass) as SOS for any sample rate."""
+    # Stage 1: high shelf (+4 dB above ~1.7 kHz)
+    f0, G, Q = 1681.974450955533, 3.999843853973347, 0.7071752369554196
+    K = math.tan(math.pi * f0 / sr)
+    Vh = 10.0 ** (G / 20.0)
+    Vb = Vh ** 0.4996667741545416
+    a0 = 1.0 + K / Q + K * K
+    shelf = [(Vh + Vb * K / Q + K * K) / a0, 2.0 * (K * K - Vh) / a0, (Vh - Vb * K / Q + K * K) / a0,
+             1.0, 2.0 * (K * K - 1.0) / a0, (1.0 - K / Q + K * K) / a0]
+    # Stage 2: high pass (~38 Hz)
+    f0, Q = 38.13547087602444, 0.5003270373238773
+    K = math.tan(math.pi * f0 / sr)
+    a0 = 1.0 + K / Q + K * K
+    hp = [1.0, -2.0, 1.0, 1.0, 2.0 * (K * K - 1.0) / a0, (1.0 - K / Q + K * K) / a0]
+    return np.array([shelf, hp])
+
+
+def measure_integrated_lufs(x: np.ndarray, sr: int) -> float:
+    """Integrated loudness (LUFS) per ITU-R BS.1770-4 with absolute and relative gating."""
+    if x.ndim == 1:
+        x = x[:, None]
+    y = signal.sosfilt(_biquad_k_weighting(sr), x, axis=0)
+    block, hop = int(0.4 * sr), int(0.1 * sr)
+    if len(y) < block:
+        z = np.mean(y ** 2, axis=0)[None, :]
+    else:
+        sq = np.cumsum(np.vstack([np.zeros((1, y.shape[1])), y ** 2]), axis=0)
+        starts = np.arange(0, len(y) - block + 1, hop)
+        z = (sq[starts + block] - sq[starts]) / block
+    lk = -0.691 + 10.0 * np.log10(np.sum(z, axis=1) + 1e-12)
+    gated = lk > -70.0
+    if not np.any(gated):
+        return -70.0
+    rel = -0.691 + 10.0 * np.log10(np.sum(np.mean(z[gated], axis=0)) + 1e-12) - 10.0
+    gated &= lk > rel
+    if not np.any(gated):
+        return -70.0
+    return float(-0.691 + 10.0 * np.log10(np.sum(np.mean(z[gated], axis=0)) + 1e-12))
+
+
+def master_for_streaming(x: np.ndarray, sr: int, target_lufs: float = -14.0,
+                         ceiling_dbtp: float = -1.0, max_reduction_db: float = 6.0) -> np.ndarray:
+    """
+    Streaming master stage (Spotify / Apple / YouTube): gain to `target_lufs` integrated, then a
+    look-ahead true-peak limiter (4x oversampled detection) holding peaks under `ceiling_dbtp`.
+    If hitting the loudness target would need more than `max_reduction_db` of limiting, the target
+    is lowered instead so transients and vocal dynamics are not crushed.
+    """
+    x = np.asarray(x, dtype=np.float32)
+    if x.ndim == 1:
+        x = x[:, None]
+    loud = measure_integrated_lufs(x, sr)
+    if loud <= -69.0:
+        return x
+    ceiling = 10.0 ** (ceiling_dbtp / 20.0)
+
+    # 4x oversampled peak per sample (inter-sample peaks are what overshoot after MP3/Ogg encoding)
+    up = np.abs(signal.resample_poly(x, 4, 1, axis=0))
+    tp = up[: len(x) * 4].reshape(len(x), 4, -1).max(axis=(1, 2))
+    del up
+
+    gain_db = target_lufs - loud
+    # Keep limiting moderate: the loudest 0.1% of peaks may only be pulled down `max_reduction_db`
+    loud_peak_db = 20.0 * np.log10(np.percentile(tp, 99.9) + 1e-9)
+    needed = loud_peak_db + gain_db - ceiling_dbtp
+    if needed > max_reduction_db:
+        gain_db -= needed - max_reduction_db
+    g_lin = 10.0 ** (gain_db / 20.0)
+
+    req = np.minimum(1.0, ceiling / (tp * g_lin + 1e-9))
+    from scipy.ndimage import minimum_filter1d
+    look = max(1, int(sr * 0.0015))
+    held = minimum_filter1d(req, size=2 * look + int(sr * 0.020), mode='nearest')
+    smooth = uniform_filter1d(held, size=look + 1, mode='nearest')
+    out = x * (g_lin * smooth)[:, None].astype(np.float32)
+    # Final safety clip for any residual overs from smoothing
+    return np.clip(out, -ceiling, ceiling).astype(np.float32)
 
 
 # Alias for backward compatibility

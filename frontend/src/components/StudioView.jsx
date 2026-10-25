@@ -1725,7 +1725,7 @@ export default function StudioView({
                             onClick={() => handleApplyRemix({ vocalGainDb: 2.5, instGainDb: -4.5, hallReverb: 0.05, spatialDepth: 0.03 })}
                             disabled={isRemixing}
                             className="btn btn-outline-gold btn-sm"
-                            title="Restore the default 3D spatial master"
+                            title="Light room reverb behind the vocal; the lead itself stays dry and centred"
                           >
                             <Sparkles /> 3D preset
                           </button>
@@ -1739,8 +1739,8 @@ export default function StudioView({
                         {[
                           { label: 'Lead vocal', val: vocalGainDb, set: setVocalGainDb, min: 0, max: 6, step: 0.2, fmt: (v) => `+${v} dB` },
                           { label: 'Music level', val: instGainDb, set: setInstGainDb, min: -14, max: 0, step: 0.5, fmt: (v) => `${v} dB` },
-                          { label: 'Hall reverb', val: hallReverb, set: setHallReverb, min: 0, max: 0.25, step: 0.01, fmt: (v) => `${Math.round(v * 100)}%` },
-                          { label: 'Stereo depth', val: spatialDepth, set: setSpatialDepth, min: 0, max: 0.15, step: 0.01, fmt: (v) => `${Math.round(v * 100)}%` },
+                          { label: 'Reverb (behind vocal)', val: hallReverb, set: setHallReverb, min: 0, max: 0.25, step: 0.01, fmt: (v) => `${Math.round(v * 100)}%` },
+                          { label: 'Room width', val: spatialDepth, set: setSpatialDepth, min: 0, max: 0.15, step: 0.01, fmt: (v) => `${Math.round(v * 100)}%` },
                         ].map((k) => (
                           <label key={k.label} className="block">
                             <div className="flex justify-between text-[11px] mb-1.5">
