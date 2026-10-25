@@ -201,6 +201,7 @@ export default function StudioView({
   onBackToLanding,
   onDeleteJob,
   personalVoices = [],
+  onRefreshJobs = () => {},
 }) {
   const [showComposerTools, setShowComposerTools] = useState(false);
   const [storage, setStorage] = useState(null);
@@ -219,6 +220,13 @@ export default function StudioView({
   };
   // Navigation tabs in sidebar: 'studio' | 'my-songs' (Templates & Settings removed per request)
   const [activeTab, setActiveTab] = useState('studio');
+
+  // When switching to My Songs library, auto-sync jobs from Cloudflare R2
+  useEffect(() => {
+    if (activeTab === 'my-songs' && onRefreshJobs) {
+      onRefreshJobs();
+    }
+  }, [activeTab]);
 
   // Input method tabs in the Ingestion Dock: 'file' | 'spotify' | 'youtube' | 'record'
   const [ingestMethod, setIngestMethod] = useState('file');
@@ -298,10 +306,8 @@ export default function StudioView({
     currentJob?.results?.saved_to_cloud
   );
 
-  // If saved in Cloudflare R2, only the Master 3D version was stored in cloud storage.
-  // When a user opens songs fetched from Cloudflare (in My Songs or on return), it ONLY shows Master 3D.
-  // In the active Studio session before saving, all 4 stems (Master 3D, Solo, Instrumental, Original) are available.
-  const isCloudOnly = isCloudSaved;
+  // A track is only strictly cloud-only if it was fetched from R2 archive without local stems
+  const isCloudOnly = Boolean(currentResults?.cloud_only && !currentResults?.vocal_wav && !currentResults?.input_audio);
 
   const availableStems = useMemo(() => {
     if (isCloudOnly) {
@@ -321,11 +327,11 @@ export default function StudioView({
     }
   }, [isCloudOnly, activeTrack]);
 
-  // Only songs saved to Cloudflare R2 are displayed in Library / My Songs
+  // Songs saved to Cloudflare R2 or archived in cloud are displayed in Library / My Songs
   const cloudSavedJobs = useMemo(() => {
     return recentJobs.filter((j) => {
       const r = j.results || {};
-      return Boolean(r.saved_to_cloud || r.cloud_master_3d_url || j.saved_to_cloud);
+      return Boolean(r.saved_to_cloud || r.cloud_master_3d_url || j.saved_to_cloud || r.cloud_only);
     });
   }, [recentJobs]);
 
@@ -377,6 +383,7 @@ export default function StudioView({
             };
           });
         }
+        if (onRefreshJobs) onRefreshJobs();
         setTimeout(() => setCloudSaveSuccess(false), 4000);
         return true;
       } else {
@@ -398,14 +405,8 @@ export default function StudioView({
     if (action === 'new_song') {
       handleStartNewSong();
     } else if (action === 'back') {
-      if (currentJob?.id && !currentResults?.saved_to_cloud) {
-        fetch(`/api/jobs/${currentJob.id}`, { method: 'DELETE' }).catch(() => {});
-      }
       onBackToLanding && onBackToLanding();
     } else if (action.type === 'switch_song') {
-      if (currentJob?.id && !currentResults?.saved_to_cloud) {
-        fetch(`/api/jobs/${currentJob.id}`, { method: 'DELETE' }).catch(() => {});
-      }
       setActiveJobId(action.jobId);
       setActiveTab('studio');
     }
@@ -413,24 +414,11 @@ export default function StudioView({
   };
 
   const requestStartNewSong = () => {
-    if (currentJob?.id && currentResults && !currentResults.saved_to_cloud) {
-      setPendingAction('new_song');
-      setShowCloudModal(true);
-    } else {
-      handleStartNewSong();
-    }
+    handleStartNewSong();
   };
 
   const requestBackToLanding = () => {
-    if (currentJob?.id && currentResults && !currentResults.saved_to_cloud) {
-      setPendingAction('back');
-      setShowCloudModal(true);
-    } else {
-      if (currentJob?.id && !currentResults?.saved_to_cloud) {
-        fetch(`/api/jobs/${currentJob.id}`, { method: 'DELETE' }).catch(() => {});
-      }
-      onBackToLanding && onBackToLanding();
-    }
+    onBackToLanding && onBackToLanding();
   };
 
   const requestSwitchJob = (targetJobId) => {
@@ -438,20 +426,12 @@ export default function StudioView({
       setActiveTab('studio');
       return;
     }
-    if (currentJob?.id && currentResults && !currentResults.saved_to_cloud) {
-      setPendingAction({ type: 'switch_song', jobId: targetJobId });
-      setShowCloudModal(true);
-    } else {
-      setActiveJobId(targetJobId);
-      setActiveTab('studio');
-    }
+    setActiveJobId(targetJobId);
+    setActiveTab('studio');
   };
 
   // Reset to create a brand new song (shows upload dock again)
   const handleStartNewSong = () => {
-    if (currentJob?.id && !currentResults?.saved_to_cloud) {
-      fetch(`/api/jobs/${currentJob.id}`, { method: 'DELETE' }).catch(() => {});
-    }
     activeStemKeys.forEach(k => {
       const el = stemAudiosRef.current[k];
       if (el) {
@@ -590,7 +570,7 @@ export default function StudioView({
     return () => {
       cancelled = true;
     };
-  }, [currentJob?.id, currentResults, cacheBuster, isCloudOnly]);
+  }, [currentJob?.id, currentResults, isCloudOnly]);
 
   useEffect(() => {
     if (!masterAudioSrc) return undefined;
@@ -624,12 +604,13 @@ export default function StudioView({
     return out;
   }, [ringAnalyser, getPlayheadTime]);
 
-  // Auto-preload active stem audio elements in parallel as soon as job completes
+  // Auto-preload active stem audio elements if RAM blob is not yet cached
   useEffect(() => {
     if (currentJob?.id && currentResults) {
       activeStemKeys.forEach(k => {
+        if (stemBlobUrls[k]) return; // Protected: Already loaded into memory!
         const el = stemAudiosRef.current[k];
-        if (el) {
+        if (el && !el.src.startsWith('blob:')) {
           const expectedSrc = getStemSource(k);
           if (expectedSrc && el.src !== expectedSrc && el.src !== window.location.origin + expectedSrc) {
             el.src = expectedSrc;
@@ -639,7 +620,7 @@ export default function StudioView({
         }
       });
     }
-  }, [currentJob?.id, currentResults, cacheBuster, activeStemKeys]);
+  }, [currentJob?.id, currentResults, activeStemKeys, stemBlobUrls]);
 
   // Instant 0ms latency stem switching without thread freezing, audio decoding lag or losing timestamp
   const selectTrack = (trackId) => {
@@ -661,6 +642,10 @@ export default function StudioView({
 
     if (newAudio) {
       audioRef.current = newAudio;
+      // If RAM blob exists and isn't yet attached to the audio element, attach it immediately
+      if (stemBlobUrls[trackId] && newAudio.src !== stemBlobUrls[trackId]) {
+        newAudio.src = stemBlobUrls[trackId];
+      }
       // Transfer exact current playhead position without reset
       if (exactTime > 0 && isFinite(exactTime)) {
         try {
@@ -1009,32 +994,44 @@ export default function StudioView({
         const wasPlay = isPlaying;
         const exactTime = currentTime;
         const newCb = Date.now().toString();
-        setCacheBuster(newCb);
         setActiveTrack('master');
 
-        setTimeout(() => {
-          STEM_KEYS.forEach(k => {
-            const el = stemAudiosRef.current[k];
-            if (el) {
-              const src = getStemSource(k, newCb);
-              el.src = src;
-              el.load();
-              if (exactTime > 0) {
-                try { el.currentTime = exactTime; } catch (e) { }
+        // Only reload Master 3D; keep Solo vocal, Instrumental, and Original pristine in RAM
+        const masterSrc = `/api/audio/${currentJob.id}/master_mp3?cb=${newCb}`;
+        fetch(masterSrc)
+          .then((r) => {
+            if (!r.ok) throw new Error(`Fetch remixed master failed: ${r.status}`);
+            return r.blob();
+          })
+          .then((blob) => {
+            const blobUrl = URL.createObjectURL(blob);
+            setStemBlobUrls((prev) => {
+              if (prev['master']) {
+                try { URL.revokeObjectURL(prev['master']); } catch (e) {}
               }
+              return { ...prev, master: blobUrl };
+            });
+            const masterEl = stemAudiosRef.current['master'];
+            if (masterEl) {
+              masterEl.src = blobUrl;
+              try { masterEl.currentTime = exactTime; } catch (e) {}
               if (wasPlay) {
-                if (k === 'master') {
-                  el.muted = isMuted;
-                  el.volume = isMuted ? 0 : volume;
-                } else {
-                  el.muted = true;
-                  el.volume = 0;
-                }
-                el.play().catch(() => { });
+                masterEl.muted = isMuted;
+                masterEl.volume = isMuted ? 0 : volume;
+                masterEl.play().catch(() => {});
               }
             }
+          })
+          .catch((e) => {
+            console.warn("Could not load remixed master blob:", e);
+            const masterEl = stemAudiosRef.current['master'];
+            if (masterEl) {
+              masterEl.src = masterSrc;
+              masterEl.load();
+              try { masterEl.currentTime = exactTime; } catch (e) {}
+              if (wasPlay) masterEl.play().catch(() => {});
+            }
           });
-        }, 150);
 
         setRemixSuccessMsg('✓ Remaster applied live!');
         setTimeout(() => setRemixSuccessMsg(''), 4000);

@@ -96,7 +96,13 @@ class JobManager:
 
     def sync_cloud_catalog(self):
         try:
-            import r2_storage
+            try:
+                from . import r2_storage
+            except Exception:
+                try:
+                    import r2_storage
+                except Exception:
+                    from backend import r2_storage
             cloud_jobs = r2_storage.get_cloud_catalog()
             if cloud_jobs and isinstance(cloud_jobs, dict):
                 with self._lock:
@@ -107,8 +113,8 @@ class JobManager:
                             updated = True
                     if updated:
                         self._save()
-        except Exception:
-            pass
+        except Exception as e:
+            print("Error in sync_cloud_catalog:", e)
 
     def list_jobs(self, limit: int = 20, completed_only: bool = True, cloud_only: bool = True) -> list:
         self.sync_cloud_catalog()
