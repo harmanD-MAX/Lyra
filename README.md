@@ -28,6 +28,17 @@ cd backend && python -m uvicorn app:app --port 8000
 cd frontend && npm run dev   # http://localhost:3000
 ```
 
+## Accounts (Google sign-in + Cloudflare D1)
+
+Sign-in is off until both Google and D1 are configured. Once on, the studio asks people to sign in with Google, and **My Songs** only lists the songs saved by that account. Accounts and song ownership live in Cloudflare D1; the audio stays in R2.
+
+1. Create the database: `npx wrangler d1 create lyra-db`, and copy its `database_id`.
+2. Create a Cloudflare API token with **Account → D1 → Edit** permission.
+3. In Google Cloud Console → APIs & Services → Credentials, create an **OAuth client ID** (type *Web application*). Add every origin you open Lyra from under **Authorized JavaScript origins**, e.g. `http://localhost:8000`, `http://localhost:3000` and `https://lyra-studio.loca.lt`.
+4. Copy `backend/.env.example` to `backend/.env` and fill in `CF_D1_DATABASE_ID`, `CF_API_TOKEN`, `GOOGLE_CLIENT_ID` and `LYRA_SESSION_SECRET`.
+
+The backend creates the tables on startup (the same schema is in `cloudflare/schema.sql`). Songs saved before sign-in was turned on have no owner, so they no longer show in My Songs.
+
 ## Voice engines
 
 | Engine | What it is | Strengths |

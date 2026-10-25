@@ -22,6 +22,8 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from jobs import job_manager
+import auth
+import d1_db
 import audio_processor
 import r2_storage
 import engines
@@ -58,6 +60,68 @@ app.add_middleware(
 async def startup_scan_jobs():
     job_manager._load()
     job_manager.sync_cloud_catalog()
+    d1_db.init_schema()
+
+
+def _require_user(request: Request) -> Optional[str]:
+    """Returns the signed-in user's id, or None when accounts are disabled."""
+    if not auth.is_auth_enabled():
+        return None
+    user_id = auth.current_user_id(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Sign in with Google to continue")
+    return user_id
+
+
+@app.get("/api/auth/config")
+async def auth_config():
+    return {"enabled": auth.is_auth_enabled(), "google_client_id": auth.GOOGLE_CLIENT_ID}
+
+
+@app.post("/api/auth/google")
+async def auth_google(request: Request):
+    if not auth.is_auth_enabled():
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+    body = await request.json()
+    credential = body.get("credential")
+    if not credential:
+        raise HTTPException(status_code=400, detail="Missing Google credential")
+    try:
+        claims = await asyncio.to_thread(auth.verify_google_credential, credential)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    try:
+        user = await asyncio.to_thread(
+            d1_db.upsert_user, claims["sub"], claims["email"], claims.get("name", ""), claims.get("picture", "")
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not save account: {e}")
+    response = JSONResponse(content={"user": user})
+    response.set_cookie(
+        auth.SESSION_COOKIE,
+        auth.create_session_token(user["id"]),
+        max_age=auth.SESSION_TTL,
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https",
+    )
+    return response
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    user_id = auth.current_user_id(request) if auth.is_auth_enabled() else None
+    if not user_id:
+        return {"user": None}
+    user = await asyncio.to_thread(d1_db.get_user, user_id)
+    return {"user": user}
+
+
+@app.post("/api/auth/logout")
+async def auth_logout():
+    response = JSONResponse(content={"status": "signed_out"})
+    response.delete_cookie(auth.SESSION_COOKIE)
+    return response
 
     for name in os.listdir(OUTPUTS_DIR):
         job_dir = os.path.join(OUTPUTS_DIR, name)
@@ -332,6 +396,7 @@ def _url_source(url: Optional[str]) -> Optional[str]:
 
 @app.post("/api/convert")
 async def start_conversion(
+    request: Request,
     audio_file: Optional[UploadFile] = File(None),
     youtube_url: Optional[str] = Form(None),
     spotify_url: Optional[str] = Form(None),
@@ -364,6 +429,7 @@ async def start_conversion(
     guide_url: Optional[str] = Form(None),
     align_timing: bool = Form(True),
 ):
+    _require_user(request)
     url = spotify_url or youtube_url
     if not audio_file and not url:
         raise HTTPException(status_code=400, detail="Please provide an audio file, YouTube URL, or Spotify URL.")
@@ -818,17 +884,25 @@ async def clear_queue():
 
 
 @app.get("/api/jobs")
-async def list_recent_jobs():
-    return JSONResponse(content={"jobs": job_manager.list_jobs(20, completed_only=True, cloud_only=True)})
+async def list_recent_jobs(request: Request):
+    if not auth.is_auth_enabled():
+        return JSONResponse(content={"jobs": job_manager.list_jobs(20, completed_only=True, cloud_only=True)})
+    user_id = auth.current_user_id(request)
+    if not user_id:
+        return JSONResponse(content={"jobs": []})
+    owned = await asyncio.to_thread(d1_db.list_song_ids, user_id)
+    jobs = [j for j in job_manager.list_jobs(500, completed_only=True, cloud_only=True) if j.get("id") in owned]
+    return JSONResponse(content={"jobs": jobs[:20]})
 
 
 @app.post("/api/jobs/{job_id}/save_to_cloud")
-async def save_job_to_cloud(job_id: str):
+async def save_job_to_cloud(job_id: str, request: Request):
     """
     Saves ONLY 1 single audio file (Master 3D) to Cloudflare R2 upon explicit user confirmation.
     Other stems/clean versions are not uploaded to save storage.
     Frees up heavy local scratch WAV files.
     """
+    user_id = _require_user(request)
     job = job_manager.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -857,6 +931,13 @@ async def save_job_to_cloud(job_id: str):
     cloud_url = r2_storage.upload_audio_to_r2(master_file, remote_key, content_type=content_type)
     if not cloud_url:
         raise HTTPException(status_code=500, detail="Failed to upload Master 3D to Cloudflare R2")
+
+    if user_id:
+        title = (job.get("results") or {}).get("title") or (job.get("metadata") or {}).get("title") or job_id
+        try:
+            await asyncio.to_thread(d1_db.add_song, job_id, user_id, title, cloud_url)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Saved to R2 but could not record the song in D1: {e}")
 
     # Update job metadata in memory and disk
     if "results" not in job:
@@ -915,7 +996,13 @@ async def save_job_to_cloud(job_id: str):
 
 
 @app.delete("/api/jobs/{job_id}")
-async def delete_job(job_id: str):
+async def delete_job(job_id: str, request: Request):
+    if auth.is_auth_enabled():
+        owner = await asyncio.to_thread(d1_db.get_song_owner, job_id)
+        if owner:
+            if owner != auth.current_user_id(request):
+                raise HTTPException(status_code=403, detail="This song belongs to another account")
+            await asyncio.to_thread(d1_db.delete_song, job_id)
     success = job_manager.delete_job(job_id)
     # Remove files if exist
     job_dir = os.path.join(OUTPUTS_DIR, job_id)
