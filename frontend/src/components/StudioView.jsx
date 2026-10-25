@@ -8,7 +8,7 @@ import {
   Sliders, CheckCircle2, AlertCircle,
   ChevronDown, ChevronUp, Disc, Loader2, X, RefreshCw,
   PlusCircle, Trash2, Check, Cloud, Headphones,
-  Cpu, HardDrive, Layers, FileAudio, Square, User, Zap, Waves
+  Cpu, HardDrive, Layers, FileAudio, Square, User, Zap, Waves, Menu
 } from 'lucide-react';
 import ProcessingStatus from './ProcessingStatus';
 import ComposerTools from './ComposerTools';
@@ -249,6 +249,10 @@ export default function StudioView({
   const [volume, setVolume] = useState(0.85);
   const [isMuted, setIsMuted] = useState(false);
   const [showAcousticPanel, setShowAcousticPanel] = useState(false);
+  // Visualizer look for the player stage: 'ring' | 'waves' | 'bloom' | 'particles'
+  const [vizStyle, setVizStyle] = useState('ring');
+  // Mobile: the sidebar becomes a slide-in drawer
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
 
   // High precision slider scrubbing & waveform seek states
@@ -1084,7 +1088,7 @@ export default function StudioView({
   const isRecordedTake = Boolean(audioFile && audioFile.name?.startsWith('vocal_recording_'));
 
   return (
-    <div className="flex h-screen w-full bg-[#07080a] text-white overflow-hidden font-sans select-none">
+    <div className="flex flex-col md:flex-row min-h-[100dvh] md:h-screen w-full bg-[#07080a] text-white overflow-x-clip md:overflow-hidden font-sans select-none">
 
       {/* HTML5 Audio Engine for Available Stems */}
       {activeStemKeys.map((stemKey) => (
@@ -1143,23 +1147,62 @@ export default function StudioView({
       ))}
 
       {/* =========================================================================
-          SIDEBAR
+          MOBILE TOP BAR
          ========================================================================= */}
-      <aside className="w-60 lg:w-64 bg-[#0a0b0e]/90 backdrop-blur-xl border-r border-white/[0.06] flex flex-col justify-between p-4 flex-shrink-0 z-20">
-        <div className="space-y-5">
-          <button
-            type="button"
-            onClick={onBackToLanding}
-            className="flex items-center gap-2.5 px-2 pt-1 cursor-pointer select-none group"
-            title="Back to the home page"
-          >
-            <LyraLogo />
-            <span className="text-lg font-bold uppercase tracking-[0.22em] text-white group-hover:text-[#e5a958] transition-colors" style={{ fontFamily: 'var(--font-display)' }}>
-              Lyra
-            </span>
+      <header className="md:hidden sticky top-0 z-30 flex items-center justify-between gap-2 px-3 h-14 bg-[#0a0b0e]/90 backdrop-blur-xl border-b border-white/[0.06]">
+        <div className="flex items-center gap-1 min-w-0">
+          <button type="button" onClick={() => setMobileNavOpen(true)} className="btn btn-ghost btn-sm btn-icon" title="Menu" aria-label="Open menu">
+            <Menu />
           </button>
+          <button type="button" onClick={onBackToLanding} className="flex items-center gap-2 cursor-pointer min-w-0" title="Back to the home page">
+            <LyraLogo />
+            <span className="text-base font-bold uppercase tracking-[0.2em] text-white" style={{ fontFamily: 'var(--font-display)' }}>Lyra</span>
+          </button>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className="seg">
+            {[
+              { id: 'studio', icon: Compass, label: 'Studio' },
+              { id: 'my-songs', icon: Music2, label: 'My Songs' },
+            ].map(({ id, icon: Icon, label }) => (
+              <button key={id} type="button" className="seg-item !px-2.5" data-active={activeTab === id} data-tone="gold" onClick={() => setActiveTab(id)} title={label} aria-label={label}>
+                <Icon />
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={requestStartNewSong} className="btn btn-primary btn-sm btn-icon" title="New song" aria-label="New song">
+            <PlusCircle />
+          </button>
+        </div>
+      </header>
 
-          <button type="button" onClick={requestStartNewSong} className="btn btn-primary w-full">
+      {mobileNavOpen && (
+        <div className="md:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-sm animate-fadeIn" onClick={() => setMobileNavOpen(false)} />
+      )}
+
+      {/* =========================================================================
+          SIDEBAR (slide-in drawer on mobile)
+         ========================================================================= */}
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] overflow-y-auto transition-transform duration-300 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'} md:static md:z-20 md:translate-x-0 md:w-60 lg:w-64 md:overflow-visible bg-[#0a0b0e] md:bg-[#0a0b0e]/90 backdrop-blur-xl border-r border-white/[0.06] flex flex-col justify-between gap-5 p-4 flex-shrink-0`}>
+        <div className="space-y-5">
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={onBackToLanding}
+              className="flex items-center gap-2.5 px-2 pt-1 cursor-pointer select-none group"
+              title="Back to the home page"
+            >
+              <LyraLogo />
+              <span className="text-lg font-bold uppercase tracking-[0.22em] text-white group-hover:text-[#e5a958] transition-colors" style={{ fontFamily: 'var(--font-display)' }}>
+                Lyra
+              </span>
+            </button>
+            <button type="button" onClick={() => setMobileNavOpen(false)} className="md:!hidden btn btn-ghost btn-sm btn-icon" title="Close menu" aria-label="Close menu">
+              <X />
+            </button>
+          </div>
+
+          <button type="button" onClick={() => { setMobileNavOpen(false); requestStartNewSong(); }} className="btn btn-primary w-full">
             <PlusCircle /> New song
           </button>
 
@@ -1174,7 +1217,7 @@ export default function StudioView({
                 <button
                   key={id}
                   type="button"
-                  onClick={() => setActiveTab(id)}
+                  onClick={() => { setActiveTab(id); setMobileNavOpen(false); }}
                   className={`relative w-full flex items-center justify-between gap-3 px-3 h-10 rounded-xl text-sm transition-all cursor-pointer ${on ? 'bg-white/[0.08] text-white font-semibold' : 'text-white/60 hover:text-white hover:bg-white/[0.04]'}`}
                 >
                   {on && <span className="absolute left-0 top-2.5 bottom-2.5 w-[3px] rounded-full bg-[#e5a958]" />}
@@ -1190,7 +1233,7 @@ export default function StudioView({
 
           {auth?.user ? (
             <div className="panel-inset p-2.5 flex items-center gap-2.5">
-              <AccountMenu user={auth.user} onSignOut={auth.signOut} onOpenSongs={() => setActiveTab('my-songs')} align="left" />
+              <AccountMenu user={auth.user} onSignOut={auth.signOut} onOpenSongs={() => { setActiveTab('my-songs'); setMobileNavOpen(false); }} align="left" />
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-semibold text-white truncate">{auth.user.name || 'Signed in'}</div>
                 <div className="text-[10px] text-white/45 truncate">{auth.user.email}</div>
@@ -1264,15 +1307,15 @@ export default function StudioView({
       {/* =========================================================================
           MAIN WORKSPACE (fixed to viewport height)
          ========================================================================= */}
-      <main className="flex-1 flex flex-col bg-transparent h-screen overflow-hidden relative select-none">
+      <main className="flex-1 min-w-0 flex flex-col bg-transparent md:h-screen overflow-x-clip md:overflow-hidden relative select-none">
         <div className="hero-grid absolute inset-0 pointer-events-none" />
         <div className="aurora pointer-events-none absolute -top-48 right-[-15%] w-[900px] h-[560px] opacity-60" />
 
-        <div className="relative flex-1 h-full max-h-screen overflow-hidden p-3 sm:p-4 lg:p-5 flex flex-col">
+        <div className="relative flex-1 md:h-full md:max-h-screen md:overflow-hidden p-3 sm:p-4 lg:p-5 flex flex-col">
 
           {/* ===================================================== MY SONGS */}
           {activeTab === 'my-songs' && (
-            <div className="max-w-6xl w-full mx-auto h-full flex flex-col overflow-hidden gap-4 animate-fadeIn">
+            <div className="max-w-6xl w-full mx-auto md:h-full flex flex-col md:overflow-hidden gap-4 animate-fadeIn">
               <div className="flex items-end justify-between gap-3 flex-shrink-0 pt-2">
                 <div>
                   <div className="eyebrow text-white/40">Library</div>
@@ -1284,7 +1327,7 @@ export default function StudioView({
               </div>
 
               {cloudSavedJobs.length === 0 ? (
-                <div className="panel p-14 text-center my-auto">
+                <div className="panel p-8 sm:p-14 text-center my-auto">
                   <div className="vinyl w-20 h-20 mx-auto is-playing">
                     <div className="vinyl-label bg-gradient-to-br from-[#e5a958] to-[#3fe0c5]" />
                   </div>
@@ -1295,15 +1338,15 @@ export default function StudioView({
                   </button>
                 </div>
               ) : (
-                <div className="panel flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <div className="grid grid-cols-12 px-5 py-3 text-[10px] font-mono text-white/35 uppercase tracking-[0.18em] border-b border-white/[0.06] flex-shrink-0">
+                <div className="panel md:flex-1 md:min-h-0 flex flex-col overflow-hidden">
+                  <div className="grid grid-cols-12 px-3 sm:px-5 py-3 text-[10px] font-mono text-white/35 uppercase tracking-[0.18em] border-b border-white/[0.06] flex-shrink-0">
                     <div className="col-span-1 text-center">#</div>
-                    <div className="col-span-6">Track</div>
-                    <div className="col-span-3">Voice</div>
-                    <div className="col-span-2 text-right">Actions</div>
+                    <div className="col-span-8 md:col-span-6">Track</div>
+                    <div className="hidden md:block col-span-3">Voice</div>
+                    <div className="col-span-3 md:col-span-2 text-right">Actions</div>
                   </div>
 
-                  <div className="divide-y divide-white/[0.05] overflow-y-auto flex-1">
+                  <div className="divide-y divide-white/[0.05] md:overflow-y-auto md:flex-1">
                     {cloudSavedJobs.map((j, idx) => {
                       const r = j.results || {};
                       const s = r.singer || j.metadata?.singer_name || 'Arijit Singh';
@@ -1316,7 +1359,7 @@ export default function StudioView({
                         <div
                           key={j.id}
                           onClick={() => requestSwitchJob(j.id)}
-                          className={`grid grid-cols-12 items-center px-5 py-3 transition-colors duration-200 cursor-pointer group ${isSelected ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]'}`}
+                          className={`grid grid-cols-12 items-center px-3 sm:px-5 py-3 transition-colors duration-200 cursor-pointer group ${isSelected ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]'}`}
                         >
                           <div className="col-span-1 flex items-center justify-center">
                             {isSelected && isPlaying ? (
@@ -1329,7 +1372,7 @@ export default function StudioView({
                             )}
                           </div>
 
-                          <div className="col-span-6 flex items-center gap-3.5 min-w-0 pr-4">
+                          <div className="col-span-8 md:col-span-6 flex items-center gap-2.5 sm:gap-3.5 min-w-0 pr-2 sm:pr-4">
                             <div className={`vinyl w-10 h-10 shrink-0 ${isSelected && isPlaying ? 'is-playing' : ''}`}>
                               <div className="vinyl-label" style={{ background: tone }}>
                                 {r.thumbnail && <img src={r.thumbnail} alt="" className="w-full h-full object-cover" />}
@@ -1348,14 +1391,14 @@ export default function StudioView({
                             </div>
                           </div>
 
-                          <div className="col-span-3 flex items-center gap-2 min-w-0">
+                          <div className="hidden md:flex col-span-3 items-center gap-2 min-w-0">
                             <span className="w-6 h-6 rounded-full grid place-items-center text-[9px] font-bold shrink-0" style={{ background: `${tone}22`, color: tone, border: `1px solid ${tone}55` }}>
                               {singer?.initials || s.slice(0, 2).toUpperCase()}
                             </span>
                             <span className="text-xs text-white/75 truncate">{s}</span>
                           </div>
 
-                          <div className="col-span-2 flex items-center justify-end gap-1.5">
+                          <div className="col-span-3 md:col-span-2 flex items-center justify-end gap-1 sm:gap-1.5">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -1387,7 +1430,7 @@ export default function StudioView({
 
           {/* ===================================================== STUDIO */}
           {activeTab === 'studio' && (
-            <div className="w-full h-full flex flex-col gap-3 overflow-hidden animate-fadeIn">
+            <div className="w-full md:h-full flex flex-col gap-3 md:overflow-hidden animate-fadeIn">
 
               {/* Rendering: live pipeline status */}
               {isSubmitting && currentJob && (
@@ -1398,7 +1441,7 @@ export default function StudioView({
 
               {/* ------------------------------------------------- PLAYER */}
               {currentResults && (
-                <div className="panel rim-glow p-4 sm:p-5 flex-1 min-h-0 flex flex-col gap-3 overflow-hidden animate-fadeIn">
+                <div className="panel rim-glow p-3 sm:p-5 md:flex-1 md:min-h-0 flex flex-col gap-3 overflow-hidden animate-fadeIn">
 
                   {/* Header: disc + title + badges */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 flex-shrink-0">
@@ -1430,13 +1473,27 @@ export default function StudioView({
                   </div>
 
                   {/* Stage: live aura + 3D orb, real waveform, scrubber */}
-                  <div className="flex-1 min-h-0 flex">
+                  <div className="md:flex-1 md:min-h-0 flex">
                     <div className="panel-inset p-3 sm:p-4 flex flex-col gap-3 min-h-0 flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-3 flex-shrink-0">
-                        <span className="chip chip-gold max-w-[60%] truncate">
-                          {activeTrack === 'vocal_arijit' ? `${singerName} · solo vocal` : activeStem.label}
-                        </span>
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-wrap items-center gap-2 min-w-0">
+                          <span className="chip chip-gold max-w-full truncate">
+                            {activeTrack === 'vocal_arijit' ? `${singerName} · solo vocal` : activeStem.label}
+                          </span>
+                          <div className="seg !p-[2px]" title="Visualizer style">
+                            {[
+                              { id: 'ring', label: 'Ring' },
+                              { id: 'waves', label: 'Waves' },
+                              { id: 'bloom', label: 'Bloom' },
+                              { id: 'particles', label: 'Dust' },
+                            ].map((v) => (
+                              <button key={v.id} type="button" className="seg-item !h-6 !px-2 !text-[10px]" data-active={vizStyle === v.id} data-tone="gold" onClick={() => setVizStyle(v.id)}>
+                                {v.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
                           <span className="font-mono text-xs text-white/50 tabular-nums">
                             <span className="text-[#e5a958] font-semibold text-sm">{formatTime(playhead)}</span> / {formatTime(maxDuration)}
                           </span>
@@ -1479,8 +1536,10 @@ export default function StudioView({
                       </div>
 
                       {/* Voice ring driven by the real audio at the playhead */}
-                      <div className="relative flex-1 min-h-[150px] grid place-items-center overflow-hidden">
-                        <VoiceRing className="h-full max-w-full" color={ringColor} getBands={getRingBands}>
+                      <div className={`relative grid place-items-center overflow-hidden transition-[height,max-height] duration-300 ${showAcousticPanel
+                        ? 'h-44 sm:h-52 md:h-auto md:flex-1 md:min-h-[100px] md:max-h-[200px]'
+                        : 'h-64 sm:h-80 md:h-auto md:flex-1 md:min-h-[150px]'}`}>
+                        <VoiceRing className="h-full max-w-full" color={ringColor} getBands={getRingBands} variant={vizStyle}>
                           <div className="px-2">
                             <div className="text-[9px] sm:text-[10px] font-mono uppercase tracking-[0.22em] text-white/40">{isPlaying ? 'Now playing' : 'Paused'}</div>
                             <div className="mt-1 text-2xl sm:text-3xl font-bold leading-none" style={{ fontFamily: 'var(--font-display)', color: `rgb(${ringColor.join(',')})` }}>
@@ -1508,7 +1567,7 @@ export default function StudioView({
                           setHoverX(e.clientX - rect.left);
                         }}
                         onMouseLeave={() => setHoverTime(null)}
-                        className="relative h-12 flex-shrink-0 w-full flex items-center gap-[2px] px-1 cursor-pointer group rounded-xl bg-black/25"
+                        className={`relative ${showAcousticPanel ? 'h-8' : 'h-12'} flex-shrink-0 w-full flex items-center gap-[1px] sm:gap-[2px] px-1 cursor-pointer group rounded-xl bg-black/25 transition-[height] duration-300`}
                         title="Click to seek"
                       >
                         {duration > 0 && (
@@ -1571,8 +1630,8 @@ export default function StudioView({
 
                   {/* Transport + stems */}
                   <div className="flex flex-col xl:flex-row items-center justify-between gap-3 flex-shrink-0">
-                    <div className="flex items-center gap-2 max-w-full overflow-x-auto">
-                      <div className="seg max-w-full overflow-x-auto">
+                    <div className="flex flex-wrap items-center justify-center gap-2 max-w-full">
+                      <div className="seg max-w-full flex-wrap justify-center">
                         {availableStems.map((stem) => (
                           <button
                             key={stem.id}
@@ -1630,7 +1689,7 @@ export default function StudioView({
 
                   {/* Acoustic rack */}
                   {showAcousticPanel && (
-                    <div className="panel-inset p-3.5 space-y-3 animate-fadeIn flex-shrink-0">
+                    <div className="panel-inset p-3 space-y-2.5 animate-fadeIn flex-shrink-0">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                           <Sliders className="w-4 h-4 text-[#e5a958]" />
@@ -1664,7 +1723,7 @@ export default function StudioView({
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-5 gap-y-3">
+                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-4 sm:gap-x-5 gap-y-2.5">
                         {[
                           { label: 'Lead vocal', val: vocalGainDb, set: setVocalGainDb, min: 0, max: 6, step: 0.2, fmt: (v) => `+${v} dB` },
                           { label: 'Music level', val: instGainDb, set: setInstGainDb, min: -14, max: 0, step: 0.5, fmt: (v) => `${v} dB` },
@@ -1734,7 +1793,7 @@ export default function StudioView({
 
               {/* ------------------------------------------------- CREATE DOCK */}
               {(!currentResults && !activeJobId) && (
-                <div className="panel rim-glow p-4 sm:p-5 lg:p-6 flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto animate-fadeIn">
+                <div className="panel rim-glow p-3 sm:p-5 lg:p-6 md:flex-1 md:min-h-0 flex flex-col gap-4 md:overflow-y-auto animate-fadeIn">
 
                   {/* Title + mode switch */}
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 flex-shrink-0">
@@ -1781,10 +1840,10 @@ export default function StudioView({
                     </div>
                   </div>
 
-                  <div className="grid lg:grid-cols-[1.15fr_1fr] gap-4 flex-1 min-h-0">
+                  <div className="grid lg:grid-cols-[1.15fr_1fr] gap-4 md:flex-1 md:min-h-0">
                     {/* LEFT: source */}
                     <div className="flex flex-col gap-3 min-h-0">
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="eyebrow text-white/45"><span className="text-[#e5a958]">01</span> Source</span>
                         <div className="seg">
                           {(creationCategory === 'sang_by_me'
@@ -1968,7 +2027,7 @@ export default function StudioView({
                         {/* Record */}
                         {ingestMethod === 'record' && (
                           <div className="flex-1 panel-inset p-4 sm:p-5 flex flex-col justify-center gap-4 animate-fadeIn">
-                            <div className="flex items-center gap-4">
+                            <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 sm:gap-4">
                               <div className={`rec-orb w-14 h-14 shrink-0 ${isRecording ? 'is-live' : ''}`}>
                                 <div className={`w-14 h-14 rounded-full grid place-items-center border transition-colors ${isRecording
                                   ? 'bg-rose-500/20 border-rose-400/60 text-rose-300'
