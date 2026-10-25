@@ -8,7 +8,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-echo "🎵 Preparing Lyra Studio on Google Colab..."
+echo " Preparing Lyra Studio on Google Colab..."
 
 # 1. Ensure backend dependencies are installed
 pip install -r backend/requirements.txt --quiet
@@ -26,6 +26,19 @@ TUNNEL_PASS=$(curl -s https://loca.lt/mytunnelpassword 2>/dev/null || curl -s ht
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export RVC_CUDA_GRAPH="0"
 
+# Auto-detect Google Drive if mounted
+if [ -d "/content/drive/MyDrive" ]; then
+  if [ -d "/content/drive/MyDrive/ysra-songs" ]; then
+    DRIVE_DIR="/content/drive/MyDrive/ysra-songs"
+  else
+    DRIVE_DIR="/content/drive/MyDrive/lyra-songs"
+  fi
+  mkdir -p "$DRIVE_DIR"
+  echo "📁 Google Drive detected! Saving all songs to: $DRIVE_DIR"
+  export LYRA_OUTPUTS_DIR="$DRIVE_DIR"
+  export LYRA_JOBS_FILE="$DRIVE_DIR/jobs_db.json"
+fi
+
 # 5. Launch Lyra backend in the background
 cd "$ROOT_DIR/backend"
 python3 -m uvicorn app:app --host 0.0.0.0 --port 8000 &
@@ -42,9 +55,9 @@ sleep 2
 
 echo ""
 echo "============================================================"
-echo "🚀 LYRA STUDIO IS READY!"
-echo "👉 PERMANENT URL: https://lyra-studio.loca.lt"
-echo "🔑 ONE-TIME PASSWORD (if prompted): $TUNNEL_PASS"
+echo " LYRA STUDIO IS READY!"
+echo " PERMANENT URL: https://lyra-studio.loca.lt"
+echo " ONE-TIME PASSWORD (if prompted): $TUNNEL_PASS"
 echo "============================================================"
 echo ""
 
