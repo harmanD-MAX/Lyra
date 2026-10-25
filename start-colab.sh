@@ -49,6 +49,14 @@ if [ -d "/content/drive/MyDrive" ]; then
   export LYRA_JOBS_FILE="$DRIVE_DIR/jobs_db.json"
 fi
 
+# 0. Clean up any previous runs holding port 8000 or the localtunnel socket
+echo "🔄 Clearing old processes to free port 8000 and the lyra-studio domain..."
+pkill -9 -f "lt --port" 2>/dev/null || true
+pkill -9 -f "localtunnel" 2>/dev/null || true
+pkill -9 -f "uvicorn" 2>/dev/null || true
+fuser -k 8000/tcp 2>/dev/null || true
+sleep 1
+
 # 5. Launch Lyra backend in the background
 cd "$ROOT_DIR/backend"
 python3 -m uvicorn app:app --host 0.0.0.0 --port 8000 &
@@ -57,6 +65,7 @@ SERVER_PID=$!
 cleanup() {
   kill "$SERVER_PID" 2>/dev/null || true
   kill "$LT_PID" 2>/dev/null || true
+  pkill -9 -f "lt --port" 2>/dev/null || true
   exit 0
 }
 trap cleanup SIGINT SIGTERM EXIT
@@ -70,29 +79,51 @@ for i in {1..30}; do
   sleep 1
 done
 
-# 7. Start localtunnel and detect the actual assigned URL
-rm -f /tmp/lt.log
-lt --port 8000 --subdomain lyra-studio > /tmp/lt.log 2>&1 &
-LT_PID=$!
-
-# Wait for localtunnel to assign URL
+# 7. Start localtunnel and lock in https://lyra-studio.loca.lt
+TARGET_SUBDOMAIN="lyra-studio"
+TARGET_URL="https://${TARGET_SUBDOMAIN}.loca.lt"
 ACTUAL_URL=""
-for i in {1..15}; do
-  if grep -q "your url is:" /tmp/lt.log 2>/dev/null; then
-    ACTUAL_URL=$(grep "your url is:" /tmp/lt.log | awk '{print $NF}' | tr -d '\r\n')
+LT_PID=""
+
+echo "🌐 Connecting to $TARGET_URL ..."
+
+for attempt in {1..5}; do
+  pkill -9 -f "lt --port" 2>/dev/null || true
+  sleep 1
+  rm -f /tmp/lt.log
+  lt --port 8000 --subdomain "$TARGET_SUBDOMAIN" > /tmp/lt.log 2>&1 &
+  LT_PID=$!
+
+  # Wait for localtunnel to assign URL
+  for i in {1..12}; do
+    if grep -q "your url is:" /tmp/lt.log 2>/dev/null; then
+      ACTUAL_URL=$(grep "your url is:" /tmp/lt.log | awk '{print $NF}' | tr -d '\r\n')
+      break
+    fi
+    sleep 1
+  done
+
+  if [ "$ACTUAL_URL" = "$TARGET_URL" ]; then
+    echo "✅ Successfully connected to $TARGET_URL"
     break
   fi
-  sleep 1
+
+  if [ -n "$ACTUAL_URL" ] && [ "$ACTUAL_URL" != "$TARGET_URL" ]; then
+    echo "⚠️  loca.lt temporarily gave '$ACTUAL_URL' instead of '$TARGET_URL' (attempt $attempt/5)."
+    echo "    Releasing session and retrying for '$TARGET_URL' in 2 seconds..."
+    kill "$LT_PID" 2>/dev/null || true
+    sleep 2
+  fi
 done
 
-if [ -z "$ACTUAL_URL" ]; then
-  ACTUAL_URL="https://lyra-studio.loca.lt"
+if [ -z "$ACTUAL_URL" ] || [ "$ACTUAL_URL" != "$TARGET_URL" ]; then
+  ACTUAL_URL="$TARGET_URL"
 fi
 
 echo ""
 echo "============================================================"
 echo " 🚀 LYRA STUDIO IS LIVE & READY!"
-echo " 👉 CLICK THIS LINK TO OPEN: $ACTUAL_URL"
+echo " 👉 CLICK THIS LINK TO OPEN: $TARGET_URL"
 echo " 🔑 ONE-TIME PASSWORD (if prompted): $TUNNEL_PASS"
 echo "============================================================"
 echo ""
