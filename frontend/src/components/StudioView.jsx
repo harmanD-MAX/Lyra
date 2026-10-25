@@ -1537,16 +1537,17 @@ export default function StudioView({
 
                       {/* Voice ring driven by the real audio at the playhead */}
                       <div className={`relative grid place-items-center overflow-hidden transition-[height,max-height] duration-300 ${showAcousticPanel
-                        ? 'h-44 sm:h-52 md:h-auto md:flex-1 md:min-h-[100px] md:max-h-[200px]'
+                        ? 'h-44 sm:h-52 md:h-auto md:flex-1 md:min-h-[140px] md:max-h-[240px]'
                         : 'h-64 sm:h-80 md:h-auto md:flex-1 md:min-h-[150px]'}`}>
                         <VoiceRing className="h-full max-w-full" color={ringColor} getBands={getRingBands} variant={vizStyle}>
-                          <div className="px-2">
-                            <div className="text-[9px] sm:text-[10px] font-mono uppercase tracking-[0.22em] text-white/40">{isPlaying ? 'Now playing' : 'Paused'}</div>
-                            <div className="mt-1 text-2xl sm:text-3xl font-bold leading-none" style={{ fontFamily: 'var(--font-display)', color: `rgb(${ringColor.join(',')})` }}>
+                          {/* Text scales with the centre disc; extra lines drop out when it gets small */}
+                          <div className="w-full px-[8cqw] min-w-0">
+                            <div className="hidden @min-[6.5rem]:block whitespace-nowrap font-mono uppercase text-white/40 text-[clamp(7px,7cqw,10px)] tracking-[0.18em]">{isPlaying ? 'Now playing' : 'Paused'}</div>
+                            <div className="@min-[6.5rem]:mt-1 font-bold leading-none text-[clamp(14px,24cqw,30px)]" style={{ fontFamily: 'var(--font-display)', color: `rgb(${ringColor.join(',')})` }}>
                               {ringInitials}
                             </div>
-                            <div className="mt-1.5 text-xs sm:text-sm font-semibold text-white truncate max-w-[9rem]">{singerName}</div>
-                            <div className="text-[10px] sm:text-[11px] text-white/45">{activeStem.label}</div>
+                            <div className="hidden @min-[8.5rem]:block mt-1.5 font-semibold text-white truncate text-[clamp(10px,9cqw,14px)]">{singerName}</div>
+                            <div className="hidden @min-[9rem]:block text-white/45 truncate text-[clamp(9px,7cqw,11px)]">{activeStem.label}</div>
                           </div>
                         </VoiceRing>
                         {!decoded && (

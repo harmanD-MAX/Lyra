@@ -204,7 +204,7 @@ export default function VoiceRing({ color = [229, 169, 88], getBands, variant = 
   return (
     <div className={`relative aspect-square ${className}`}>
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-hidden="true" />
-      <div className="absolute inset-[27%] rounded-full grid place-items-center text-center border border-white/10 bg-[radial-gradient(circle_at_35%_30%,rgba(255,255,255,0.08),rgba(10,11,14,0.92)_65%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_20px_60px_-20px_rgba(0,0,0,0.9)] backdrop-blur overflow-hidden">
+      <div className="@container absolute inset-[27%] rounded-full grid place-items-center text-center border border-white/10 bg-[radial-gradient(circle_at_35%_30%,rgba(255,255,255,0.08),rgba(10,11,14,0.92)_65%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_20px_60px_-20px_rgba(0,0,0,0.9)] backdrop-blur overflow-hidden">
         {children}
       </div>
     </div>
