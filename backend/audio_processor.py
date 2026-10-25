@@ -1136,6 +1136,7 @@ def master_and_remaster_track(
     retune_speed_ms: float = 35.0,
     center_anchor: float = 1.0,
     presence_boost_db: float = 2.8,
+    is_quick_remix: bool = False,
     progress_cb=None
 ) -> dict:
     """
@@ -1297,26 +1298,32 @@ def master_and_remaster_track(
 
     # Export lossless 24-bit WAVs
     sf.write(master_wav, final_mix, target_sr, subtype="PCM_24")
-    sf.write(master_clean_wav, clean_mix, target_sr, subtype="PCM_24")
+    if not is_quick_remix or not os.path.exists(master_clean_wav):
+        sf.write(master_clean_wav, clean_mix, target_sr, subtype="PCM_24")
 
-    # Export MP3s with ffmpeg for browser playback
-    os.system(f"ffmpeg -y -i '{master_wav}' -codec:a libmp3lame -b:a 320k '{master_mp3}' > /dev/null 2>&1")
-    os.system(f"ffmpeg -y -i '{master_clean_wav}' -codec:a libmp3lame -b:a 320k '{master_clean_mp3}' > /dev/null 2>&1")
+    # Fast MP3 encoding for Master 3D (-q:a 2 is fast and studio high quality)
+    os.system(f"ffmpeg -y -i '{master_wav}' -codec:a libmp3lame -q:a 2 '{master_mp3}' > /dev/null 2>&1")
+    if not is_quick_remix or not os.path.exists(master_clean_mp3):
+        os.system(f"ffmpeg -y -i '{master_clean_wav}' -codec:a libmp3lame -q:a 2 '{master_clean_mp3}' > /dev/null 2>&1")
 
-    # Export High-Fidelity 160k Opus (saves 65% space, ~2.8MB per track for Cloudflare R2)
-    master_opus = os.path.join(output_dir, "master_remastered.opus")
-    master_clean_opus = os.path.join(output_dir, "master_clean.opus")
-    os.system(f"ffmpeg -y -i '{master_wav}' -codec:a libopus -b:a 160k -vbr on '{master_opus}' > /dev/null 2>&1")
-    os.system(f"ffmpeg -y -i '{master_clean_wav}' -codec:a libopus -b:a 160k -vbr on '{master_clean_opus}' > /dev/null 2>&1")
+    # Export Opus only on full pipeline run (saves time during live acoustic tweaks)
+    if not is_quick_remix:
+        master_opus = os.path.join(output_dir, "master_remastered.opus")
+        master_clean_opus = os.path.join(output_dir, "master_clean.opus")
+        os.system(f"ffmpeg -y -i '{master_wav}' -codec:a libopus -b:a 160k -vbr on '{master_opus}' > /dev/null 2>&1")
+        os.system(f"ffmpeg -y -i '{master_clean_wav}' -codec:a libopus -b:a 160k -vbr on '{master_clean_opus}' > /dev/null 2>&1")
 
-    # Export lightweight MP3 stem previews for 0ms instant browser playback & RAM buffering
+    # Export lightweight MP3 stem previews ONLY if missing
     try:
-        if os.path.exists(vocal_processed_path):
-            os.system(f"ffmpeg -y -i '{vocal_processed_path}' -codec:a libmp3lame -b:a 192k '{os.path.join(output_dir, 'vocal_processed.mp3')}' > /dev/null 2>&1")
-        if inst_wav and os.path.exists(inst_wav):
-            os.system(f"ffmpeg -y -i '{inst_wav}' -codec:a libmp3lame -b:a 192k '{os.path.join(output_dir, 'accompaniment.mp3')}' > /dev/null 2>&1")
-        if vocal_wav and os.path.exists(vocal_wav):
-            os.system(f"ffmpeg -y -i '{vocal_wav}' -codec:a libmp3lame -b:a 192k '{os.path.join(output_dir, 'vocals.mp3')}' > /dev/null 2>&1")
+        proc_mp3 = os.path.join(output_dir, 'vocal_processed.mp3')
+        if not is_quick_remix and os.path.exists(vocal_processed_path):
+            os.system(f"ffmpeg -y -i '{vocal_processed_path}' -codec:a libmp3lame -q:a 4 '{proc_mp3}' > /dev/null 2>&1")
+        inst_mp3 = os.path.join(output_dir, 'accompaniment.mp3')
+        if not os.path.exists(inst_mp3) and inst_wav and os.path.exists(inst_wav):
+            os.system(f"ffmpeg -y -i '{inst_wav}' -codec:a libmp3lame -q:a 4 '{inst_mp3}' > /dev/null 2>&1")
+        orig_mp3 = os.path.join(output_dir, 'vocals.mp3')
+        if not os.path.exists(orig_mp3) and vocal_wav and os.path.exists(vocal_wav):
+            os.system(f"ffmpeg -y -i '{vocal_wav}' -codec:a libmp3lame -q:a 4 '{orig_mp3}' > /dev/null 2>&1")
     except Exception:
         pass
 
