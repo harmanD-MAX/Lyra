@@ -76,18 +76,17 @@ def init_schema() -> bool:
         logger.info("Cloudflare D1 not configured; accounts are disabled.")
         return False
     try:
-        for stmt in SCHEMA:
-            query(stmt)
-        # Ensure any additional columns exist
-        for col in ["id", "uid", "name", "display_name", "picture", "photo_url"]:
-            try:
-                query(f"ALTER TABLE users ADD COLUMN {col} TEXT")
-            except RuntimeError:
-                pass
-        try:
-            query("ALTER TABLE songs ADD COLUMN data TEXT")
-        except RuntimeError:
-            pass
+        cols = {r["name"] for r in query("PRAGMA table_info(users)")}
+        if not cols:
+            for stmt in SCHEMA:
+                query(stmt)
+        else:
+            for col in ["id", "uid", "name", "display_name", "picture", "photo_url"]:
+                if col not in cols:
+                    try:
+                        query(f"ALTER TABLE users ADD COLUMN {col} TEXT")
+                    except Exception:
+                        pass
         return True
     except Exception as e:
         logger.error(f"Failed to initialise D1 schema: {e}")
