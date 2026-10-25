@@ -7,20 +7,20 @@ export const PRESETS = {
   natural: {
     label: 'Natural',
     blurb: 'Light touch. Keeps your character, smooths the rough spots.',
-    my_voice: { correction: 0.45, steadiness: 0.3, vibrato: 0.0, retuneMs: 70 },
-    convert: { correction: 0.0, steadiness: 0.0, vibrato: 0.0, retuneMs: 70 },
+    my_voice: { correction: 0.45, steadiness: 0.3, vibrato: 0.0, retuneMs: 70, outputTune: 'natural' },
+    convert: { correction: 0.0, steadiness: 0.0, vibrato: 0.0, retuneMs: 70, outputTune: 'natural' },
   },
   polished: {
     label: 'Polished',
     blurb: 'In tune and steady, still human. Best for most songs.',
-    my_voice: { correction: 0.85, steadiness: 0.6, vibrato: 0.3, retuneMs: 40 },
-    convert: { correction: 0.2, steadiness: 0.15, vibrato: 0.0, retuneMs: 45 },
+    my_voice: { correction: 0.85, steadiness: 0.6, vibrato: 0.3, retuneMs: 40, outputTune: 'soulful' },
+    convert: { correction: 0.2, steadiness: 0.15, vibrato: 0.0, retuneMs: 45, outputTune: 'soulful' },
   },
   perfect: {
     label: 'Studio perfect',
     blurb: 'Every note locked on pitch with trained vibrato.',
-    my_voice: { correction: 1.0, steadiness: 0.85, vibrato: 0.5, retuneMs: 20 },
-    convert: { correction: 0.5, steadiness: 0.3, vibrato: 0.0, retuneMs: 30 },
+    my_voice: { correction: 1.0, steadiness: 0.85, vibrato: 0.5, retuneMs: 20, outputTune: 'strong' },
+    convert: { correction: 0.5, steadiness: 0.3, vibrato: 0.0, retuneMs: 30, outputTune: 'strong' },
   },
 };
 
@@ -38,6 +38,7 @@ export const DEFAULT_CREATIVE = {
   steadiness: 0.6,
   vibrato: 0.3,
   retuneMs: 40,
+  outputTune: 'soulful',     // off | natural | soulful | strong (final tune on the converted vocal)
   harmony: 'third_above',
   splitBacking: true,
   dereverb: true,
@@ -65,6 +66,7 @@ export function resolveCreative(c) {
     steadiness: c.steadiness,
     vibrato: c.vibrato,
     retuneMs: c.retuneMs,
+    outputTune: c.outputTune,
     pitchMode: c.pitchMode,
     key: c.key,
     harmony: c.addHarmony ? c.harmony : 'none',

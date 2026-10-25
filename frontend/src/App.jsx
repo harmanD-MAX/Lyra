@@ -244,6 +244,7 @@ export default function App() {
     formData.append('steadiness', r.steadiness);
     formData.append('vibrato', r.vibrato);
     formData.append('retune_ms', r.retuneMs);
+    formData.append('output_tune', selectedModel === 'raw' ? 'off' : (r.outputTune || 'soulful'));
     formData.append('harmony', selectedModel === 'raw' ? 'none' : r.harmony);
     formData.append('split_backing', r.splitBacking);
     formData.append('dereverb', r.dereverb);
