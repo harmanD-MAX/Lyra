@@ -34,7 +34,19 @@ import voices
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
-OUTPUTS_DIR = os.environ.get("LYRA_OUTPUTS_DIR", os.path.join(BASE_DIR, "outputs"))
+
+# Auto-detect Google Drive in Colab if mounted
+DRIVE_BASE = "/content/drive/MyDrive"
+if os.path.isdir(DRIVE_BASE):
+    if os.path.isdir(os.path.join(DRIVE_BASE, "ysra-songs")):
+        DEFAULT_OUTPUTS_DIR = os.path.join(DRIVE_BASE, "ysra-songs")
+    else:
+        DEFAULT_OUTPUTS_DIR = os.path.join(DRIVE_BASE, "lyra-songs")
+    os.makedirs(DEFAULT_OUTPUTS_DIR, exist_ok=True)
+else:
+    DEFAULT_OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
+
+OUTPUTS_DIR = os.environ.get("LYRA_OUTPUTS_DIR", DEFAULT_OUTPUTS_DIR)
 MODELS_DIR = os.path.join(BASE_DIR, "models", "arijit_singh")
 
 os.makedirs(UPLOADS_DIR, exist_ok=True)
@@ -887,7 +899,7 @@ async def clear_queue():
 @app.get("/api/jobs")
 async def list_recent_jobs(request: Request):
     if not auth.is_auth_enabled():
-        return JSONResponse(content={"jobs": job_manager.list_jobs(20, completed_only=True, cloud_only=True)})
+        return JSONResponse(content={"jobs": job_manager.list_jobs(200, completed_only=True, cloud_only=False)})
     user_id = auth.current_user_id(request)
     if not user_id:
         return JSONResponse(content={"jobs": []})
@@ -912,17 +924,36 @@ async def save_job_to_cloud(job_id: str, request: Request):
     Frees up heavy local scratch WAV files.
     """
     user_id = _require_user(request)
-    job = job_manager.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-
     job_dir = os.path.join(OUTPUTS_DIR, job_id)
+    if not os.path.exists(job_dir):
+        for alt in [
+            os.path.join(BASE_DIR, "outputs", job_id),
+            os.path.join("/content/drive/MyDrive/lyra-songs", job_id),
+            os.path.join("/content/drive/MyDrive/ysra-songs", job_id)
+        ]:
+            if os.path.exists(alt):
+                job_dir = alt
+                break
+
     if not os.path.exists(job_dir):
         raise HTTPException(status_code=404, detail="Job directory not found")
 
+    job = job_manager.get_job(job_id)
+    if not job:
+        meta_p = os.path.join(job_dir, "meta.json")
+        if os.path.exists(meta_p):
+            try:
+                with open(meta_p) as f:
+                    job = json.load(f)
+                    job_manager._jobs[job_id] = job
+            except Exception:
+                pass
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
     # Locate the Master 3D audio file
     master_file = None
-    for candidate in ["master_remastered.mp3", "master_remastered.opus", "master_remastered.wav"]:
+    for candidate in ["master_remastered.mp3", "master_3d.mp3", "master_remastered.opus", "master_remastered.wav", "master_clean.mp3", "master_clean.wav"]:
         cand_path = os.path.join(job_dir, candidate)
         if os.path.exists(cand_path) and os.path.getsize(cand_path) > 1000:
             master_file = cand_path
@@ -961,6 +992,8 @@ async def save_job_to_cloud(job_id: str, request: Request):
         job["results"] = {}
     job["results"]["saved_to_cloud"] = True
     job["results"]["cloud_master_3d_url"] = cloud_url
+    job["saved_to_cloud"] = True
+    job_manager._jobs[job_id] = job
     job_manager._save()
 
     meta_path = os.path.join(job_dir, "meta.json")
@@ -990,19 +1023,30 @@ async def save_job_to_cloud(job_id: str, request: Request):
             "results": job.get("results", {})
         }
         r2_storage.save_cloud_catalog(catalog)
+        job_manager.sync_cloud_catalog()
     except Exception as e:
         print("Error saving cloud catalog to R2:", e)
 
-    # Clean up ALL heavy temporary local stems and uncompressed WAVs from outputs folder
-    # Cloudflare R2 stores the single Master 3D MP3, so local outputs only needs meta.json (1 KB)
-    for fname in os.listdir(job_dir):
-        if fname not in ["meta.json", "master_remastered.mp3"]:
-            try:
-                fpath = os.path.join(job_dir, fname)
-                if os.path.isfile(fpath):
-                    os.remove(fpath)
-            except Exception:
-                pass
+    # Clean up only temporary intermediate scratch files; keep finished stems & previews
+    _SAVE_KEEP = {
+        "meta.json", "pipeline_state.json",
+        "master_remastered.mp3", "master_remastered.wav",
+        "master_clean.mp3", "master_clean.wav",
+        "converted_vocals.wav", "vocal_processed.wav", "vocal_processed.mp3",
+        "accompaniment.wav", "accompaniment.mp3", "instrumental.wav",
+        "vocals.wav", "vocals.mp3", "input_audio.wav"
+    }
+    if not job_dir.startswith("/content/drive"):
+        for fname in os.listdir(job_dir):
+            if fname not in _SAVE_KEEP:
+                try:
+                    fpath = os.path.join(job_dir, fname)
+                    if os.path.isfile(fpath):
+                        os.remove(fpath)
+                    elif os.path.isdir(fpath):
+                        shutil.rmtree(fpath, ignore_errors=True)
+                except Exception:
+                    pass
 
     return JSONResponse(content={
         "status": "success",
@@ -1060,6 +1104,15 @@ async def quick_remix(
         raise HTTPException(status_code=400, detail="Job must be completed before remixing.")
 
     job_dir = os.path.join(OUTPUTS_DIR, job_id)
+    if not os.path.isdir(job_dir):
+        for cand_dir in [
+            os.path.join(BASE_DIR, "outputs", job_id),
+            os.path.join("/content/drive/MyDrive/lyra-songs", job_id),
+            os.path.join("/content/drive/MyDrive/ysra-songs", job_id)
+        ]:
+            if os.path.isdir(cand_dir):
+                job_dir = cand_dir
+                break
     
     # Locate the dry rendered vocal (pitch is already corrected on the F0 curve)
     vocal_path = None
@@ -1174,6 +1227,15 @@ def stream_audio_file(file_path: str, request: Request, media_type: str, downloa
 @app.api_route("/api/audio/{job_id}/{track_type}", methods=["GET", "HEAD"])
 async def get_audio_file(job_id: str, track_type: str, request: Request, download: bool = False):
     job_dir = os.path.join(OUTPUTS_DIR, job_id)
+    if not os.path.isdir(job_dir):
+        for cand_dir in [
+            os.path.join(BASE_DIR, "outputs", job_id),
+            os.path.join("/content/drive/MyDrive/lyra-songs", job_id),
+            os.path.join("/content/drive/MyDrive/ysra-songs", job_id)
+        ]:
+            if os.path.isdir(cand_dir):
+                job_dir = cand_dir
+                break
     
     # Check for processed vocal stem with studio acoustics first
     vocal_filename = "vocal_processed.wav"
@@ -1184,11 +1246,12 @@ async def get_audio_file(job_id: str, track_type: str, request: Request, downloa
     
     file_map = {
         "input": "input_audio.wav",
-        "vocal_original": "vocals.wav",
-        "instrumental": "accompaniment.wav" if os.path.exists(os.path.join(job_dir, "accompaniment.wav")) else (
-            "guide/accompaniment.wav" if os.path.exists(os.path.join(job_dir, "guide", "accompaniment.wav")) else "instrumental.wav"),
-        "vocal_arijit": vocal_filename,
-        "vocal_converted": vocal_filename,
+        "vocal_original": "vocals.mp3" if (not download and os.path.exists(os.path.join(job_dir, "vocals.mp3"))) else "vocals.wav",
+        "instrumental": "accompaniment.mp3" if (not download and os.path.exists(os.path.join(job_dir, "accompaniment.mp3"))) else (
+            "accompaniment.wav" if os.path.exists(os.path.join(job_dir, "accompaniment.wav")) else (
+                "guide/accompaniment.wav" if os.path.exists(os.path.join(job_dir, "guide", "accompaniment.wav")) else "instrumental.wav")),
+        "vocal_arijit": (vocal_filename[:-4] + ".mp3") if (not download and os.path.exists(os.path.join(job_dir, vocal_filename[:-4] + ".mp3"))) else vocal_filename,
+        "vocal_converted": (vocal_filename[:-4] + ".mp3") if (not download and os.path.exists(os.path.join(job_dir, vocal_filename[:-4] + ".mp3"))) else vocal_filename,
         "vocal_autotuned": "vocal_autotuned.wav",
         "master_wav": "master_remastered.wav",
         "master_mp3": "master_remastered.mp3",
@@ -1246,6 +1309,22 @@ async def get_audio_file(job_id: str, track_type: str, request: Request, downloa
                         from fastapi.responses import RedirectResponse
                         return RedirectResponse(url=r2_url, status_code=307)
             raise HTTPException(status_code=404, detail=f"Audio file '{filename}' not found for job {job_id}")
+
+    # For streaming browser playback, serve lightweight MP3 if available or convert fast
+    if not download and file_path.endswith(".wav"):
+        mp3_preview = file_path[:-4] + ".mp3"
+        if os.path.exists(mp3_preview) and os.path.getsize(mp3_preview) > 100:
+            file_path = mp3_preview
+        elif os.path.exists(file_path):
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", file_path, "-codec:a", "libmp3lame", "-b:a", "192k", mp3_preview],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=8
+                )
+                if os.path.exists(mp3_preview) and os.path.getsize(mp3_preview) > 100:
+                    file_path = mp3_preview
+            except Exception:
+                pass
 
     media_type = "audio/mpeg" if file_path.endswith(".mp3") else "audio/wav"
     download_filename = f"StudioMaster_{track_type}_{os.path.basename(file_path)}"
