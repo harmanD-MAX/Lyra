@@ -59,7 +59,8 @@ sleep 1
 
 # 5. Launch Lyra backend in the background
 cd "$ROOT_DIR/backend"
-python3 -m uvicorn app:app --host 0.0.0.0 --port 8000 &
+rm -f /tmp/uvicorn.log
+python3 -m uvicorn app:app --host 0.0.0.0 --port 8000 > /tmp/uvicorn.log 2>&1 &
 SERVER_PID=$!
 
 cleanup() {
@@ -72,12 +73,22 @@ trap cleanup SIGINT SIGTERM EXIT
 
 # 6. Wait for backend server to be fully ready before opening tunnel
 echo "⏳ Waiting for Lyra backend to initialize..."
-for i in {1..30}; do
+READY=0
+for i in {1..35}; do
   if curl -s http://127.0.0.1:8000/api/info >/dev/null 2>&1; then
+    READY=1
     break
   fi
   sleep 1
 done
+
+if [ "$READY" -eq 0 ]; then
+  echo "❌ Backend did not respond on http://127.0.0.1:8000 within 35 seconds."
+  echo "Backend logs:"
+  tail -n 30 /tmp/uvicorn.log 2>/dev/null || true
+  exit 1
+fi
+echo "✅ Lyra backend is online and responding on port 8000."
 
 # 7. Start localtunnel and lock in https://lyra-studio.loca.lt
 TARGET_SUBDOMAIN="lyra-studio"
@@ -85,13 +96,13 @@ TARGET_URL="https://${TARGET_SUBDOMAIN}.loca.lt"
 ACTUAL_URL=""
 LT_PID=""
 
-echo "🌐 Connecting to $TARGET_URL ..."
+echo "🌐 Connecting tunnel to $TARGET_URL ..."
 
 for attempt in {1..5}; do
   pkill -9 -f "lt --port" 2>/dev/null || true
   sleep 1
   rm -f /tmp/lt.log
-  lt --port 8000 --subdomain "$TARGET_SUBDOMAIN" > /tmp/lt.log 2>&1 &
+  lt --port 8000 --local-host 127.0.0.1 --subdomain "$TARGET_SUBDOMAIN" > /tmp/lt.log 2>&1 &
   LT_PID=$!
 
   # Wait for localtunnel to assign URL
