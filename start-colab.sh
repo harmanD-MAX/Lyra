@@ -22,6 +22,15 @@ fi
 # 3. Retrieve gateway password (server external IP)
 TUNNEL_PASS=$(curl -s https://loca.lt/mytunnelpassword 2>/dev/null || curl -s https://ipv4.icanhazip.com 2>/dev/null || echo "Check Colab IP")
 
+# Accounts: the Cloudflare D1 token is a secret, so it comes from Colab Secrets, never the repo
+if [ -z "${CF_API_TOKEN:-}" ]; then
+  echo "⚠️  CF_API_TOKEN is not set: Google login and My Songs accounts are off."
+  echo "    In a notebook cell first run:"
+  echo "      import os; from google.colab import userdata"
+  echo "      os.environ['CF_API_TOKEN'] = userdata.get('CF_API_TOKEN')"
+  echo "      os.environ['LYRA_SESSION_SECRET'] = userdata.get('LYRA_SESSION_SECRET')"
+fi
+
 # 4. Set CUDA performance & OOM prevention environment variables
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export RVC_CUDA_GRAPH="0"
