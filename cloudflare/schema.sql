@@ -1,6 +1,6 @@
 -- Lyra accounts database (Cloudflare D1).
 -- The backend also creates these tables on startup; this file is for
---   npx wrangler d1 execute lyra-db --remote --file=cloudflare/schema.sql
+--   npx wrangler d1 execute lyra-users --remote --file=cloudflare/schema.sql
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,            -- Google account "sub"
   email TEXT NOT NULL UNIQUE,

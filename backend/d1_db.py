@@ -11,7 +11,7 @@ logger = logging.getLogger("lyra_d1")
 # Cloudflare D1 is reached over its REST API, so the backend can run anywhere
 # (Colab, Mac, a VPS) and still share one database with the R2 bucket's account.
 CF_ACCOUNT_ID = os.environ.get("CF_ACCOUNT_ID") or os.environ.get("R2_ACCOUNT_ID", "")
-CF_D1_DATABASE_ID = os.environ.get("CF_D1_DATABASE_ID", "")
+CF_D1_DATABASE_ID = os.environ.get("CF_D1_DATABASE_ID", "abdb3d95-5aca-4aa3-88d4-5eed4f8204d6")  # lyra-users
 CF_API_TOKEN = os.environ.get("CF_API_TOKEN", "")
 
 SCHEMA = [
