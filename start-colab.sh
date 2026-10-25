@@ -46,20 +46,46 @@ SERVER_PID=$!
 
 cleanup() {
   kill "$SERVER_PID" 2>/dev/null || true
+  kill "$LT_PID" 2>/dev/null || true
   exit 0
 }
 trap cleanup SIGINT SIGTERM EXIT
 
-# 6. Wait for server to initialize
-sleep 2
+# 6. Wait for backend server to be fully ready before opening tunnel
+echo "⏳ Waiting for Lyra backend to initialize..."
+for i in {1..30}; do
+  if curl -s http://127.0.0.1:8000/api/info >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
+# 7. Start localtunnel and detect the actual assigned URL
+rm -f /tmp/lt.log
+lt --port 8000 --subdomain lyra-studio > /tmp/lt.log 2>&1 &
+LT_PID=$!
+
+# Wait for localtunnel to assign URL
+ACTUAL_URL=""
+for i in {1..15}; do
+  if grep -q "your url is:" /tmp/lt.log 2>/dev/null; then
+    ACTUAL_URL=$(grep "your url is:" /tmp/lt.log | awk '{print $NF}' | tr -d '\r\n')
+    break
+  fi
+  sleep 1
+done
+
+if [ -z "$ACTUAL_URL" ]; then
+  ACTUAL_URL="https://lyra-studio.loca.lt"
+fi
 
 echo ""
 echo "============================================================"
-echo " LYRA STUDIO IS READY!"
-echo " PERMANENT URL: https://lyra-studio.loca.lt"
-echo " ONE-TIME PASSWORD (if prompted): $TUNNEL_PASS"
+echo " 🚀 LYRA STUDIO IS LIVE & READY!"
+echo " 👉 CLICK THIS LINK TO OPEN: $ACTUAL_URL"
+echo " 🔑 ONE-TIME PASSWORD (if prompted): $TUNNEL_PASS"
 echo "============================================================"
 echo ""
 
-# 7. Bind to the permanent subdomain lyra-studio
-exec lt --port 8000 --subdomain lyra-studio
+# Follow the tunnel log in foreground
+wait $SERVER_PID
