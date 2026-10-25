@@ -73,8 +73,10 @@ def retune_world(
 
         if progress_cb:
             progress_cb(70, "Analysing your voice (pitch, timbre, breath)...")
-        f0, t = pw.harvest(mono, sr, f0_floor=60.0, f0_ceil=1100.0, frame_period=FRAME_PERIOD_MS)
-        f0 = pw.stonemask(mono, f0, t, sr)
+        # Pitch is tracked at 16 kHz (about 3x faster than harvest at 44.1 kHz on a full song);
+        # timbre and breathiness are still analysed at full rate
+        f0 = analyse_f0(mono, sr)
+        t = np.arange(len(f0)) * (FRAME_PERIOD_MS / 1000.0)
         sp = pw.cheaptrick(mono, f0, t, sr)
         ap = pw.d4c(mono, f0, t, sr)
 
@@ -151,3 +153,173 @@ def retune_world(
             sf.write(output_wav, y.astype(np.float32), sr, subtype="PCM_24")
 
         return {"path": output_wav, "f0": f0_new.astype(np.float32), "fps": fps}
+
+
+# ---------------------------------------------------------------------------
+# Final vocal tune: polish the converted vocal itself
+# ---------------------------------------------------------------------------
+
+# Seed-VC re-generates the voice, so its output can drift off the corrected
+# melody and crack on fast or high notes. The final tune polishes the output
+# with one "soulful" setting: in key, steady held notes, gentle vibrato on long
+# notes, and a retune speed slow enough to keep slides and meend.
+SOULFUL_TUNE = dict(strength=0.70, retune_ms=55.0, steadiness=0.50, vibrato=0.35)
+
+
+def analyse_f0_rmvpe(y: np.ndarray, sr: int):
+    """Singing pitch with RMVPE (robust on breathy and high notes). Returns (f0, fps); harvest fallback."""
+    try:
+        import os
+        import librosa
+        import torch
+        from configs.config import Config
+        from infer.rmvpe import RMVPE
+
+        root = os.environ.get("rmvpe_root", os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets"))
+        path = os.path.join(root, "rmvpe.pt")
+        if not os.path.exists(path):
+            # Seed-VC renders never load RVC, so RMVPE may not be on disk yet
+            import model_downloader
+            url = model_downloader.RVC_BASE_FILES.get(os.path.join(model_downloader.ASSETS_DIR, "rmvpe.pt"))
+            if url and os.path.abspath(root) == os.path.abspath(model_downloader.ASSETS_DIR):
+                model_downloader._download_file(url, path)
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
+        config = Config()
+        model = RMVPE(path, is_half=config.is_half, device=config.device)
+        mono = y.astype(np.float32) if y.ndim == 1 else y.mean(axis=1).astype(np.float32)
+        y16 = librosa.resample(mono, orig_sr=sr, target_sr=16000) if sr != 16000 else mono
+        with torch.no_grad():
+            f0 = model.infer_from_audio(y16, thred=0.03).astype(np.float64)
+        del model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return f0, 100.0
+    except Exception as e:
+        logger.info(f"RMVPE unavailable for the final tune ({e}); using harvest")
+        return analyse_f0(y, sr), 1000.0 / FRAME_PERIOD_MS
+
+
+def repair_f0_cracks(f0: np.ndarray, fps: float) -> np.ndarray:
+    """
+    Fix pitch cracks in a voiced F0 curve: octave flips and short spikes that jump
+    far from the surrounding melody are pulled back onto it. Unvoiced frames stay 0.
+    """
+    from scipy.ndimage import median_filter
+
+    f0 = np.asarray(f0, dtype=np.float64)
+    voiced = f0 > 0
+    if voiced.sum() < 5:
+        return f0
+    midi = np.zeros_like(f0)
+    midi[voiced] = 69.0 + 12.0 * np.log2(f0[voiced] / 440.0)
+    idx = np.arange(len(f0))
+    filled = np.interp(idx, idx[voiced], midi[voiced])
+    ref = median_filter(filled, size=max(5, int(0.08 * fps) | 1), mode="nearest")
+
+    dev = midi - ref
+    fixed = midi.copy()
+    octave = voiced & (np.abs(dev) > 7.0)
+    fixed[octave] -= 12.0 * np.round(dev[octave] / 12.0)
+    still_off = voiced & (np.abs(fixed - ref) > 3.0)
+    fixed[still_off] = ref[still_off]
+    return np.where(voiced, 440.0 * 2.0 ** ((fixed - 69.0) / 12.0), 0.0)
+
+
+def _psola_retune(audio: np.ndarray, sr: int, f0_target: np.ndarray, fps: float) -> np.ndarray:
+    """Move the voiced pitch of `audio` (n, ch) onto `f0_target` with PSOLA. Timbre and breath are kept."""
+    import parselmouth
+    from parselmouth.praat import call
+
+    t_step = 1.0 / fps
+    channels = audio.shape[1]
+    if channels > 1 and np.allclose(audio[:, 0], audio[:, 1:].T, atol=1e-4):
+        audio = audio[:, :1]  # dual-mono: retune once, copy back to every channel
+    out = []
+    pitch_tier = None
+    for ch in range(audio.shape[1]):
+        snd = parselmouth.Sound(audio[:, ch].astype(np.float64), sampling_frequency=sr)
+        manip = call(snd, "To Manipulation", t_step, 60.0, 1100.0)
+        if pitch_tier is None:
+            pitch_tier = call(manip, "Extract pitch tier")
+            call(pitch_tier, "Remove points between", 0.0, snd.duration + 0.1)
+            for i, f in enumerate(f0_target):
+                if f > 0:
+                    call(pitch_tier, "Add point", float(i * t_step), float(f))
+        call([manip, pitch_tier], "Replace pitch tier")
+        out.append(call(manip, "Get resynthesis (overlap-add)").as_array()[0])
+    n = min(len(audio), *(len(y) for y in out))
+    y = np.zeros((len(audio), audio.shape[1]), dtype=np.float32)
+    y[:n] = np.column_stack([o[:n] for o in out])
+    return np.repeat(y, channels, axis=1) if y.shape[1] < channels else y
+
+
+def polish_output_pitch(
+    input_wav: str,
+    output_wav: str,
+    key=None,
+    progress_cb=None,
+) -> dict:
+    """
+    Final vocal tune on the converted vocal: repair pitch cracks, bring notes into
+    key, steady shaky held notes and bloom gentle vibrato on long notes.
+    Pitch is moved with the PC-NSF-HiFiGAN neural vocoder (PSOLA, then WORLD, as fallbacks),
+    and only phrases that actually need moving are replaced, so the rest of the converted
+    vocal is left untouched. Returns {"path", "f0", "fps"}.
+    """
+    import melody
+
+    audio, sr = sf.read(input_wav, always_2d=True)
+
+    if progress_cb:
+        progress_cb(84, "Autotune: reading the sung pitch (RMVPE)...")
+    f0, fps = analyse_f0_rmvpe(audio, sr)
+    repaired = repair_f0_cracks(f0, fps)
+    target = melody.correct_pitch(repaired, fps=fps, key=key, **SOULFUL_TUNE).astype(np.float64)
+
+    # Never move a frame more than 2 semitones from what was sung (tracker errors)
+    voiced = (repaired > 0) & (target > 0)
+    ratio = np.ones_like(target)
+    ratio[voiced] = np.clip(target[voiced] / repaired[voiced], 2 ** (-2 / 12), 2 ** (2 / 12))
+    target = np.where(voiced, repaired * ratio, 0.0)
+
+    if progress_cb:
+        progress_cb(85, "Autotune: in key, steady notes, vibrato on long notes...")
+    y = None
+    try:
+        import pc_nsf_hifigan
+        voc = pc_nsf_hifigan.revoice(audio.mean(axis=1), sr, target, fps)
+        if voc is not None:
+            y = np.repeat(voc[:, None], audio.shape[1], axis=1)
+    except Exception as e:
+        logger.warning(f"PC-NSF-HiFiGAN autotune failed ({e}); using PSOLA")
+    if y is None:
+        try:
+            y = _psola_retune(audio, sr, target, fps)
+        except Exception as e:
+            logger.info(f"PSOLA retune unavailable ({e}); using WORLD for the final tune")
+            return retune_world(input_wav, output_wav,
+                                lambda f, _fps: melody.correct_pitch(repair_f0_cracks(f, _fps), fps=_fps, key=key, **SOULFUL_TUNE),
+                                smooth_tone=0.0)
+
+    # Only sung phrases that actually move (> 4 cents somewhere) are replaced; consonants,
+    # breaths and phrases already in tune keep the original audio. 10 ms crossfades.
+    from scipy.ndimage import binary_dilation, uniform_filter1d
+    cents = np.zeros_like(target)
+    cents[voiced] = 1200.0 * np.abs(np.log2(ratio[voiced]))
+    need = np.zeros(len(target), dtype=bool)
+    edges = np.flatnonzero(np.diff(np.concatenate([[0], voiced.astype(np.int8), [0]])))
+    for s0, e0 in zip(edges[::2], edges[1::2]):
+        if np.any(cents[s0:e0] > 4.0):
+            need[s0:e0] = True
+    need = binary_dilation(need, iterations=max(1, int(0.02 * fps)))
+    hop = sr / fps
+    frame_of_sample = np.minimum((np.arange(len(audio)) / hop).astype(int), len(need) - 1)
+    mask = uniform_filter1d(need[frame_of_sample].astype(np.float32), size=max(1, int(0.010 * sr)))
+    y = audio.astype(np.float32) * (1.0 - mask[:, None]) + y.astype(np.float32) * mask[:, None]
+
+    peak = float(np.max(np.abs(y))) + 1e-9
+    if peak > 0.98:
+        y = y / peak * 0.95
+    sf.write(output_wav, y, sr, subtype="PCM_24")
+    return {"path": output_wav, "f0": target.astype(np.float32), "fps": fps}

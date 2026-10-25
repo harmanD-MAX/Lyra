@@ -268,6 +268,8 @@ export default function StudioView({
   const [isRemixing, setIsRemixing] = useState(false);
   const [cacheBuster, setCacheBuster] = useState('');
   const [remixSuccessMsg, setRemixSuccessMsg] = useState('');
+  const [autotuneOn, setAutotuneOn] = useState(false);
+  const [isAutotuning, setIsAutotuning] = useState(false);
 
   // Mic recording
   const [isRecording, setIsRecording] = useState(false);
@@ -838,8 +840,11 @@ export default function StudioView({
       };
 
       mr.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-        const rawFile = new File([audioBlob], `vocal_recording_${Date.now()}.wav`, { type: 'audio/wav' });
+        // MediaRecorder produces WebM/Ogg/MP4, not WAV: label it truthfully so players and ffmpeg read it right
+        const mime = (mr.mimeType || 'audio/webm').split(';')[0];
+        const ext = mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'm4a' : 'webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: mime });
+        const rawFile = new File([audioBlob], `vocal_recording_${Date.now()}.${ext}`, { type: mime });
         const rawUrl = URL.createObjectURL(rawFile);
 
         setRawAudioFile(rawFile);
@@ -966,6 +971,69 @@ export default function StudioView({
         audio.currentTime = prevPos;
         if (wasPlay) audio.play().catch(() => { });
       }
+    }
+  };
+
+  // New renders come back autotuned; older songs start with autotune off
+  useEffect(() => {
+    setAutotuneOn(Boolean(currentJob?.results?.autotune));
+  }, [currentJob?.id]);
+
+  /** Re-fetch the given stems into blobs and swap them in without moving the playhead. */
+  const reloadStems = (keys) => {
+    const cb = Date.now().toString();
+    keys.forEach((key) => {
+      fetch(getStemSource(key, cb))
+        .then((r) => {
+          if (!r.ok) throw new Error(`Fetch ${key} failed: ${r.status}`);
+          return r.blob();
+        })
+        .then((blob) => {
+          const blobUrl = URL.createObjectURL(blob);
+          setStemBlobUrls((prev) => {
+            if (prev[key]) {
+              try { URL.revokeObjectURL(prev[key]); } catch (e) {}
+            }
+            return { ...prev, [key]: blobUrl };
+          });
+          const el = stemAudiosRef.current[key];
+          if (el) {
+            const wasPlay = !el.paused && !el.ended;
+            const t = el.currentTime || 0;
+            el.src = blobUrl;
+            try { el.currentTime = t; } catch (e) {}
+            if (wasPlay) el.play().catch(() => {});
+          }
+        })
+        .catch((e) => console.warn(`Could not reload ${key}:`, e));
+    });
+  };
+
+  const handleToggleAutotune = async () => {
+    if (!currentJob?.id || isAutotuning) return;
+    const next = !autotuneOn;
+    setIsAutotuning(true);
+    try {
+      const fd = new FormData();
+      fd.append('job_id', currentJob.id);
+      fd.append('enabled', next);
+      fd.append('vocal_gain_db', vocalGainDb);
+      fd.append('inst_gain_db', instGainDb);
+      fd.append('reverb_amount', hallReverb);
+      fd.append('echo_amount', spatialDepth);
+      const res = await fetch('/api/autotune', { method: 'POST', body: fd });
+      if (res.ok) {
+        setAutotuneOn(next);
+        reloadStems(['master', 'vocal_arijit']);
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        alert(`Autotune failed: ${errJson.detail || 'Server error while applying autotune'}`);
+      }
+    } catch (err) {
+      console.error('Autotune failed:', err);
+      alert('Network error while communicating with audio backend.');
+    } finally {
+      setIsAutotuning(false);
     }
   };
 
@@ -1690,13 +1758,30 @@ export default function StudioView({
                       </button>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setShowAcousticPanel(!showAcousticPanel)}
-                      className={`btn btn-sm ${showAcousticPanel ? 'btn-outline-gold' : 'btn-secondary'}`}
-                    >
-                      <Sliders /> Acoustic rack {showAcousticPanel ? <ChevronUp /> : <ChevronDown />}
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={handleToggleAutotune}
+                        disabled={isAutotuning || isCloudOnly}
+                        aria-pressed={autotuneOn}
+                        className={`btn btn-sm ${autotuneOn ? 'btn-outline-teal' : 'btn-secondary'}`}
+                        title={isCloudOnly
+                          ? "This song's vocal stem isn't on the server, so autotune can't be applied"
+                          : autotuneOn
+                            ? 'Autotune is on: in key, steady notes, vibrato on long notes. Click to hear the vocal without it.'
+                            : 'Apply soulful autotune to the vocal'}
+                      >
+                        {isAutotuning ? <span className="ring-loader !w-3.5 !h-3.5" /> : <Waves />}
+                        Autotune {autotuneOn ? 'on' : 'off'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowAcousticPanel(!showAcousticPanel)}
+                        className={`btn btn-sm ${showAcousticPanel ? 'btn-outline-gold' : 'btn-secondary'}`}
+                      >
+                        <Sliders /> Acoustic rack {showAcousticPanel ? <ChevronUp /> : <ChevronDown />}
+                      </button>
+                    </div>
                   </div>
 
                   {/* Acoustic rack */}
@@ -2187,11 +2272,13 @@ export default function StudioView({
                   <button
                     type="button"
                     onClick={handleConvertTrigger}
-                    disabled={isSubmitting || !hasValidInput}
+                    disabled={isSubmitting || isTuningVocal || !hasValidInput}
                     className={`btn btn-lg w-full flex-shrink-0 ${isSubmitting || !hasValidInput ? 'btn-secondary' : 'btn-primary shine-btn'}`}
                   >
                     {isSubmitting ? (
                       <><span className="eq-loader"><span /><span /><span /><span /></span> Converting…</>
+                    ) : isTuningVocal ? (
+                      <><Loader2 className="animate-spin" /> Tuning your take…</>
                     ) : (
                       <>
                         <Sparkles /> Convert song

@@ -63,6 +63,7 @@ class JobParams:
     steadiness: float = 0.5
     vibrato: float = 0.0
     harmony: str = "none"
+    autotune: bool = True                  # soulful autotune on the converted vocal (player button toggles it)
     # guide (my_voice)
     guide_source_type: Optional[str] = None  # file | youtube | spotify
     guide_file_path: Optional[str] = None
@@ -239,6 +240,65 @@ def _world_retune(src: str, out: str, pitch_options: Optional[dict], key, streng
     return voice_enhance.retune_world(src, out, correct, progress_cb=progress)
 
 
+UNTUNED_LEAD = "converted_vocals_untuned.wav"
+TUNED_LEAD_CACHE = "converted_vocals_tuned.wav"
+
+
+def _final_tune(vocal_path: str, key, progress=None) -> Optional[dict]:
+    """Autotune the converted vocal in place. Returns {f0, fps} or None on failure."""
+    import voice_enhance
+    tmp = vocal_path.replace(".wav", "_final_tune.wav")
+    try:
+        r = voice_enhance.polish_output_pitch(vocal_path, tmp, key=key, progress_cb=progress)
+        os.replace(tmp, vocal_path)
+        return r
+    except Exception as e:
+        logger.warning(f"Autotune skipped: {e}")
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        return None
+
+
+def set_autotune(job_dir: str, enabled: bool) -> bool:
+    """
+    Switch autotune on the finished lead vocal. The untuned lead is kept beside it, so
+    switching is lossless; the tuned lead is cached so switching back is instant.
+    Returns the new state.
+    """
+    lead = os.path.join(job_dir, "converted_vocals.wav")
+    untuned = os.path.join(job_dir, UNTUNED_LEAD)
+    cache = os.path.join(job_dir, TUNED_LEAD_CACHE)
+    state_path = os.path.join(job_dir, "pipeline_state.json")
+    state = {}
+    if os.path.exists(state_path):
+        with open(state_path) as f:
+            state = json.load(f)
+    is_on = bool(state.get("autotune", os.path.exists(untuned)))
+    if not os.path.exists(lead):
+        raise FileNotFoundError("Converted vocal missing")
+
+    if enabled and not is_on:
+        if not os.path.exists(untuned):
+            shutil.copy2(lead, untuned)  # songs rendered before autotune existed
+        if os.path.exists(cache):
+            os.replace(cache, lead)
+        else:
+            shutil.copy2(untuned, lead)
+            if _final_tune(lead, tuple(state["key"]) if state.get("key") else None) is None:
+                raise RuntimeError("Autotune failed on this vocal")
+    elif not enabled and is_on:
+        if not os.path.exists(untuned):
+            raise FileNotFoundError("The untuned vocal for this song is missing")
+        os.replace(lead, cache)
+        shutil.copy2(untuned, lead)
+
+    if os.path.exists(state_path):
+        state["autotune"] = enabled
+        with open(state_path, "w") as f:
+            json.dump(state, f, indent=2)
+    return enabled
+
+
 def _render(source: str, out_name: str, job_dir: str, p: "JobParams", model_info: dict, engine: str,
             pitch_options: Optional[dict], key, strength: float, guide_lead: Optional[str],
             harmony_degrees: int = 0, progress=None) -> dict:
@@ -373,6 +433,19 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
             engine_reason = f"fell back from {engine}"
         f0, fps, engine = r["f0"], r["fps"], r["engine"]
 
+    # 6b. Autotune the converted output (the engine can drift off the melody or crack).
+    # The untuned lead is kept so the player's Autotune button can switch it off.
+    autotuned = False
+    if not is_raw and p.autotune:
+        shutil.copy2(lead_out, os.path.join(job_dir, UNTUNED_LEAD))
+        tuned = _final_tune(lead_out, key, progress)
+        if tuned is not None:
+            f0, fps = tuned["f0"], tuned["fps"]
+            autotuned = True
+        else:
+            os.remove(os.path.join(job_dir, UNTUNED_LEAD))
+    analysis["autotune"] = autotuned
+
     # IMMEDIATELY UNLOAD NEURAL MODELS FROM RAM / VRAM AT 85%
     # HuBERT, RMVPE, and RVC Synthesizer weights (~2.5GB) are purged before mastering starts
     try:
@@ -456,6 +529,7 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
         "engine_reason": engine_reason,
         "strength": strength,
         "separation_engine": sep["engine"],
+        "autotune": autotuned,
     }
     with open(os.path.join(job_dir, "pipeline_state.json"), "w") as f:
         json.dump(state, f, indent=2)
@@ -472,6 +546,7 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
         "engine_label": engines.ENGINE_LABELS.get(engine, engine),
         "engine_reason": engine_reason,
         "separation_engine": sep["engine"],
+        "autotune": autotuned,
         "master": master,
     }
 
@@ -481,7 +556,9 @@ def rerender_section(job_dir: str, start: float, end: float, overrides: dict,
     """Re-render only [start, end] seconds of the lead with new settings and splice it in."""
     with open(os.path.join(job_dir, "pipeline_state.json")) as f:
         state = json.load(f)
-    p = JobParams(**{**state["params"], **{k: v for k, v in overrides.items() if v is not None}})
+    known = set(JobParams.__dataclass_fields__)
+    p = JobParams(**{k: v for k, v in {**state["params"], **{k: v for k, v in overrides.items() if v is not None}}.items()
+                     if k in known})
     if p.model_name == "raw":
         raise ValueError("Section re-render needs a neural voice target (not 'raw').")
     if end <= start:
@@ -519,8 +596,15 @@ def rerender_section(job_dir: str, start: float, end: float, overrides: dict,
     trimmed = out[int(lead_pad * osr): int((lead_pad + (end - start)) * osr)]
     trimmed_path = os.path.join(job_dir, "_section_trimmed.wav")
     sf.write(trimmed_path, trimmed, osr, subtype="PCM_24")
-
     lead = os.path.join(job_dir, "converted_vocals.wav")
+    untuned = os.path.join(job_dir, UNTUNED_LEAD)
+    if os.path.exists(untuned):
+        _splice(untuned, trimmed_path, start, end, untuned)
+    cache = os.path.join(job_dir, TUNED_LEAD_CACHE)
+    if os.path.exists(cache):
+        os.remove(cache)  # stale after the splice; rebuilt next time autotune is switched on
+    if state.get("autotune"):
+        _final_tune(trimmed_path, tuple(state["key"]) if state.get("key") else None)
     _splice(lead, trimmed_path, start, end, lead)
     vocal_for_mix = lead
     harmony = os.path.join(job_dir, "harmony_vocals.wav")
