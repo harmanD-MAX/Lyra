@@ -73,8 +73,10 @@ def retune_world(
 
         if progress_cb:
             progress_cb(70, "Analysing your voice (pitch, timbre, breath)...")
-        f0, t = pw.harvest(mono, sr, f0_floor=60.0, f0_ceil=1100.0, frame_period=FRAME_PERIOD_MS)
-        f0 = pw.stonemask(mono, f0, t, sr)
+        # Pitch is tracked at 16 kHz (about 3x faster than harvest at 44.1 kHz on a full song);
+        # timbre and breathiness are still analysed at full rate
+        f0 = analyse_f0(mono, sr)
+        t = np.arange(len(f0)) * (FRAME_PERIOD_MS / 1000.0)
         sp = pw.cheaptrick(mono, f0, t, sr)
         ap = pw.d4c(mono, f0, t, sr)
 

@@ -263,7 +263,8 @@ export default function App() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || 'Failed to start conversion process');
+        const detail = typeof errorData.detail === 'string' ? errorData.detail : '';
+        throw new Error(detail || `Failed to start conversion (server replied ${response.status}${response.status >= 502 ? ': the backend or tunnel did not respond in time' : ''})`);
       }
 
       const data = await response.json();
