@@ -890,9 +890,17 @@ async def list_recent_jobs(request: Request):
     user_id = auth.current_user_id(request)
     if not user_id:
         return JSONResponse(content={"jobs": []})
-    owned = await asyncio.to_thread(d1_db.list_song_ids, user_id)
-    jobs = [j for j in job_manager.list_jobs(500, completed_only=True, cloud_only=True) if j.get("id") in owned]
-    return JSONResponse(content={"jobs": jobs[:20]})
+    # Every song the account saved to R2, straight from D1 (not limited to this machine's history)
+    songs = await asyncio.to_thread(d1_db.list_songs, user_id)
+    jobs = []
+    for song in songs:
+        local = job_manager.get_job(song["id"])
+        if local and local.get("status") == "completed" and (local.get("results") or {}).get("saved_to_cloud"):
+            jobs.append(local)
+        else:
+            job_manager.remember_job(song)
+            jobs.append(song)
+    return JSONResponse(content={"jobs": jobs})
 
 
 @app.post("/api/jobs/{job_id}/save_to_cloud")
@@ -935,7 +943,15 @@ async def save_job_to_cloud(job_id: str, request: Request):
     if user_id:
         title = (job.get("results") or {}).get("title") or (job.get("metadata") or {}).get("title") or job_id
         try:
-            await asyncio.to_thread(d1_db.add_song, job_id, user_id, title, cloud_url)
+            song_record = {
+                "id": job_id,
+                "status": "completed",
+                "progress": 100,
+                "created_at": job.get("created_at", time.time()),
+                "metadata": job.get("metadata", {}),
+                "results": job.get("results", {}),
+            }
+            await asyncio.to_thread(d1_db.add_song, job_id, user_id, title, cloud_url, song_record)
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"Saved to R2 but could not record the song in D1: {e}")
 

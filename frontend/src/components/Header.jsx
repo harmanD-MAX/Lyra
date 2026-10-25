@@ -1,8 +1,8 @@
 import React from 'react';
 import LyraLogo from './LyraLogo';
-import GoogleSignIn from './GoogleSignIn';
+import AccountMenu from './AccountMenu';
 
-export default function Header({ currentView = 'landing', onViewChange, auth }) {
+export default function Header({ currentView = 'landing', onViewChange, auth, onLogin, onOpenSongs }) {
   const handleNavigation = (sectionId) => {
     if (currentView !== 'landing') {
       if (onViewChange) onViewChange('landing');
@@ -64,8 +64,14 @@ export default function Header({ currentView = 'landing', onViewChange, auth }) 
         </nav>
 
         {/* Right Action */}
-        <div className="flex items-center gap-4">
-          {auth ? <GoogleSignIn auth={auth} size="medium" /> : null}
+        <div className="flex items-center gap-3">
+          {auth?.user ? (
+            <AccountMenu user={auth.user} onSignOut={auth.signOut} onOpenSongs={onOpenSongs} />
+          ) : auth && !auth.loading ? (
+            <button type="button" onClick={onLogin} className="btn btn-secondary">
+              Log in
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => onViewChange && onViewChange('studio')}

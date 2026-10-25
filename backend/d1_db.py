@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import logging
 from typing import Any, Optional
@@ -27,6 +28,7 @@ SCHEMA = [
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         title TEXT,
         cloud_url TEXT,
+        data TEXT,
         created_at INTEGER NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_songs_user ON songs(user_id, created_at DESC)",
@@ -62,6 +64,12 @@ def init_schema() -> bool:
     try:
         for stmt in SCHEMA:
             query(stmt)
+        # Databases created before songs.data existed
+        try:
+            query("ALTER TABLE songs ADD COLUMN data TEXT")
+        except RuntimeError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
         return True
     except Exception as e:
         logger.error(f"Failed to initialise D1 schema: {e}")
@@ -86,18 +94,41 @@ def get_user(user_id: str) -> Optional[dict]:
     return rows[0] if rows else None
 
 
-def add_song(job_id: str, user_id: str, title: str, cloud_url: str) -> None:
+def add_song(job_id: str, user_id: str, title: str, cloud_url: str, job: dict) -> None:
+    """Records a saved song; `job` is the full job record so the song can be reopened anywhere."""
     query(
-        """INSERT INTO songs (job_id, user_id, title, cloud_url, created_at)
-           VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(job_id) DO UPDATE SET title = excluded.title, cloud_url = excluded.cloud_url""",
-        [job_id, user_id, title, cloud_url, int(time.time())],
+        """INSERT INTO songs (job_id, user_id, title, cloud_url, data, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(job_id) DO UPDATE SET
+             title = excluded.title, cloud_url = excluded.cloud_url, data = excluded.data""",
+        [job_id, user_id, title, cloud_url, json.dumps(job), int(time.time())],
     )
 
 
-def list_song_ids(user_id: str) -> set[str]:
-    rows = query("SELECT job_id FROM songs WHERE user_id = ?", [user_id])
-    return {r["job_id"] for r in rows}
+def list_songs(user_id: str) -> list[dict]:
+    """Returns the user's songs as job records, newest first."""
+    rows = query(
+        "SELECT job_id, title, cloud_url, data, created_at FROM songs WHERE user_id = ? ORDER BY created_at DESC",
+        [user_id],
+    )
+    songs = []
+    for r in rows:
+        try:
+            job = json.loads(r.get("data") or "{}")
+        except ValueError:
+            job = {}
+        job["id"] = r["job_id"]
+        job["status"] = "completed"
+        job.setdefault("progress", 100)
+        job.setdefault("created_at", r["created_at"])
+        job.setdefault("metadata", {})
+        results = job.get("results") or {}
+        results.setdefault("title", r.get("title"))
+        results["saved_to_cloud"] = True
+        results["cloud_master_3d_url"] = results.get("cloud_master_3d_url") or r.get("cloud_url")
+        job["results"] = results
+        songs.append(job)
+    return songs
 
 
 def get_song_owner(job_id: str) -> Optional[str]:

@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS songs (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title TEXT,
   cloud_url TEXT,                 -- Master 3D in R2
+  data TEXT,                      -- full job record (JSON), so the song reopens on any machine
   created_at INTEGER NOT NULL
 );
 

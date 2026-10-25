@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import LyraLogo from './LyraLogo';
+import AccountMenu from './AccountMenu';
 import {
   Compass, Music2, Play, Pause,
   Download, Volume2, VolumeX, ArrowRight,
@@ -201,6 +202,10 @@ export default function StudioView({
   onBackToLanding,
   onDeleteJob,
   personalVoices = [],
+  initialTab = 'studio',
+  auth = null,
+  onLogin,
+  onSongsChanged,
 }) {
   const [showComposerTools, setShowComposerTools] = useState(false);
   const [storage, setStorage] = useState(null);
@@ -218,7 +223,7 @@ export default function StudioView({
     }
   };
   // Navigation tabs in sidebar: 'studio' | 'my-songs' (Templates & Settings removed per request)
-  const [activeTab, setActiveTab] = useState('studio');
+  const [activeTab, setActiveTab] = useState(initialTab);
 
   // Input method tabs in the Ingestion Dock: 'file' | 'spotify' | 'youtube' | 'record'
   const [ingestMethod, setIngestMethod] = useState('file');
@@ -364,6 +369,7 @@ export default function StudioView({
       if (res.ok) {
         const data = await res.json();
         setCloudSaveSuccess(true);
+        if (onSongsChanged) onSongsChanged();
         if (setCurrentJob) {
           setCurrentJob(prev => {
             if (!prev) return prev;
@@ -1186,6 +1192,18 @@ export default function StudioView({
               );
             })}
           </nav>
+
+          {auth?.user ? (
+            <div className="panel-inset p-2.5 flex items-center gap-2.5">
+              <AccountMenu user={auth.user} onSignOut={auth.signOut} onOpenSongs={() => setActiveTab('my-songs')} align="left" />
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold text-white truncate">{auth.user.name || 'Signed in'}</div>
+                <div className="text-[10px] text-white/45 truncate">{auth.user.email}</div>
+              </div>
+            </div>
+          ) : auth && !auth.enabled && onLogin ? (
+            <button type="button" onClick={onLogin} className="btn btn-secondary w-full">Log in</button>
+          ) : null}
 
           {/* Now playing mini card */}
           {currentResults && (
