@@ -36,7 +36,9 @@ export RVC_CUDA_GRAPH="0"
 
 # Auto-detect Google Drive if mounted
 if [ -d "/content/drive/MyDrive" ]; then
-  if [ -d "/content/drive/MyDrive/ysra-songs" ]; then
+  if [ -d "/content/drive/MyDrive/Lyra_Songs" ]; then
+    DRIVE_DIR="/content/drive/MyDrive/Lyra_Songs"
+  elif [ -d "/content/drive/MyDrive/ysra-songs" ]; then
     DRIVE_DIR="/content/drive/MyDrive/ysra-songs"
   else
     DRIVE_DIR="/content/drive/MyDrive/lyra-songs"
