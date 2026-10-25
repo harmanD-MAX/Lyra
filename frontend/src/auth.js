@@ -1,30 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
 
-const GIS_SRC = 'https://accounts.google.com/gsi/client';
-let gisPromise = null;
+// Firebase only does the Google popup; the backend checks its token, stores the
+// account in Cloudflare D1 and sets an httpOnly session cookie.
+let firebaseAuth = null;
 
-function loadGoogleScript() {
-  if (window.google?.accounts?.id) return Promise.resolve();
-  if (!gisPromise) {
-    gisPromise = new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = GIS_SRC;
-      script.async = true;
-      script.onload = resolve;
-      script.onerror = () => { gisPromise = null; reject(new Error('Could not load Google sign-in')); };
-      document.head.appendChild(script);
-    });
+async function getFirebaseAuth(config) {
+  if (!firebaseAuth) {
+    const [{ initializeApp }, { getAuth }] = await Promise.all([import('firebase/app'), import('firebase/auth')]);
+    firebaseAuth = getAuth(initializeApp(config));
   }
-  return gisPromise;
+  return firebaseAuth;
 }
 
-// Accounts live in Cloudflare D1; the backend sets an httpOnly session cookie.
 export function useAuth() {
-  const [config, setConfig] = useState({ enabled: false, google_client_id: '' });
+  const [config, setConfig] = useState({ enabled: false, firebase: null });
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [signingIn, setSigningIn] = useState(false);
   const [error, setError] = useState('');
-  const [googleReady, setGoogleReady] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -39,40 +32,42 @@ export function useAuth() {
       .finally(() => setLoading(false));
   }, []);
 
-  const handleCredential = useCallback(async ({ credential }) => {
+  const signIn = useCallback(async () => {
+    if (!config.firebase) return;
     setError('');
+    setSigningIn(true);
     try {
-      const res = await fetch('/api/auth/google', {
+      const fbAuth = await getFirebaseAuth(config.firebase);
+      const { GoogleAuthProvider, signInWithPopup, signOut: fbSignOut } = await import('firebase/auth');
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const result = await signInWithPopup(fbAuth, provider);
+      const idToken = await result.user.getIdToken();
+      const res = await fetch('/api/auth/firebase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential }),
+        body: JSON.stringify({ id_token: idToken }),
       });
       const data = await res.json().catch(() => ({}));
+      // Lyra's own cookie is the session from here on
+      await fbSignOut(fbAuth).catch(() => { });
       if (!res.ok) throw new Error(data.detail || 'Sign-in failed');
       setUser(data.user);
     } catch (err) {
-      setError(err.message);
+      if (err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request') {
+        setError(err?.code === 'auth/unauthorized-domain'
+          ? `Add ${window.location.hostname} to Firebase → Authentication → Settings → Authorized domains`
+          : err.message || 'Sign-in failed');
+      }
+    } finally {
+      setSigningIn(false);
     }
-  }, []);
-
-  useEffect(() => {
-    if (!config.enabled || !config.google_client_id) return;
-    loadGoogleScript()
-      .then(() => {
-        window.google.accounts.id.initialize({
-          client_id: config.google_client_id,
-          callback: handleCredential,
-        });
-        setGoogleReady(true);
-      })
-      .catch(err => setError(err.message));
-  }, [config.enabled, config.google_client_id, handleCredential]);
+  }, [config.firebase]);
 
   const signOut = useCallback(async () => {
     await fetch('/api/auth/logout', { method: 'POST' }).catch(() => { });
-    window.google?.accounts?.id?.disableAutoSelect();
     setUser(null);
   }, []);
 
-  return { enabled: config.enabled, user, loading, error, googleReady, signOut };
+  return { enabled: config.enabled, user, loading, signingIn, error, signIn, signOut };
 }

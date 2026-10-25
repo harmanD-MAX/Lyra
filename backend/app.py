@@ -75,24 +75,25 @@ def _require_user(request: Request) -> Optional[str]:
 
 @app.get("/api/auth/config")
 async def auth_config():
-    return {"enabled": auth.is_auth_enabled(), "google_client_id": auth.GOOGLE_CLIENT_ID}
+    enabled = auth.is_auth_enabled()
+    return {"enabled": enabled, "firebase": auth.FIREBASE_CONFIG if enabled else None}
 
 
-@app.post("/api/auth/google")
-async def auth_google(request: Request):
+@app.post("/api/auth/firebase")
+async def auth_firebase(request: Request):
     if not auth.is_auth_enabled():
         raise HTTPException(status_code=503, detail="Google sign-in is not configured")
     body = await request.json()
-    credential = body.get("credential")
-    if not credential:
-        raise HTTPException(status_code=400, detail="Missing Google credential")
+    id_token = body.get("id_token")
+    if not id_token:
+        raise HTTPException(status_code=400, detail="Missing sign-in token")
     try:
-        claims = await asyncio.to_thread(auth.verify_google_credential, credential)
+        account = await asyncio.to_thread(auth.verify_firebase_token, id_token)
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
     try:
         user = await asyncio.to_thread(
-            d1_db.upsert_user, claims["sub"], claims["email"], claims.get("name", ""), claims.get("picture", "")
+            d1_db.upsert_user, account["id"], account["email"], account["name"], account["picture"]
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Could not save account: {e}")
