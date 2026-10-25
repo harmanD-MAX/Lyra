@@ -958,18 +958,19 @@ async def tune_preview(audio_file: UploadFile = File(...)):
         with open(raw_path, "wb") as buffer:
             shutil.copyfileobj(audio_file.file, buffer)
 
-        import subprocess
-        subprocess.run([
+        await asyncio.to_thread(subprocess.run, [
             "ffmpeg", "-y", "-i", raw_path,
             "-ar", "44100", "-ac", "2",
             standard_path
         ], capture_output=True, check=True)
 
-        # Same engine as the full pipeline: correct the pitch curve, re-synthesize once
+        # Same engine as the full pipeline: correct the pitch curve, re-synthesize once.
+        # Runs in a worker thread: done on the event loop it froze the whole server for
+        # minutes, so other requests (like starting the conversion) timed out at the tunnel.
         import melody
         import voice_enhance
-        voice_enhance.retune_world(
-            standard_path, tuned_path,
+        await asyncio.to_thread(
+            voice_enhance.retune_world, standard_path, tuned_path,
             lambda f0, fps: melody.correct_pitch(f0, fps=fps, strength=0.9, retune_ms=30.0, steadiness=0.6, vibrato=0.3),
         )
 
@@ -1361,8 +1362,9 @@ async def quick_remix(
     if not vocal_path:
         raise HTTPException(status_code=404, detail="Vocal stem missing")
 
-    # Re-run master with instant acoustics & balance (< 1 second)
-    audio_processor.master_and_remaster_track(
+    # Re-run master with the new acoustics & balance (in a worker thread so the server stays responsive)
+    await asyncio.to_thread(
+        audio_processor.master_and_remaster_track,
         vocal_wav=vocal_path,
         inst_wav=inst_path if (inst_path and os.path.exists(inst_path)) else None,
         output_dir=job_dir,

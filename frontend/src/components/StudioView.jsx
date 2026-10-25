@@ -840,8 +840,11 @@ export default function StudioView({
       };
 
       mr.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-        const rawFile = new File([audioBlob], `vocal_recording_${Date.now()}.wav`, { type: 'audio/wav' });
+        // MediaRecorder produces WebM/Ogg/MP4, not WAV: label it truthfully so players and ffmpeg read it right
+        const mime = (mr.mimeType || 'audio/webm').split(';')[0];
+        const ext = mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'm4a' : 'webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: mime });
+        const rawFile = new File([audioBlob], `vocal_recording_${Date.now()}.${ext}`, { type: mime });
         const rawUrl = URL.createObjectURL(rawFile);
 
         setRawAudioFile(rawFile);
@@ -2269,11 +2272,13 @@ export default function StudioView({
                   <button
                     type="button"
                     onClick={handleConvertTrigger}
-                    disabled={isSubmitting || !hasValidInput}
+                    disabled={isSubmitting || isTuningVocal || !hasValidInput}
                     className={`btn btn-lg w-full flex-shrink-0 ${isSubmitting || !hasValidInput ? 'btn-secondary' : 'btn-primary shine-btn'}`}
                   >
                     {isSubmitting ? (
                       <><span className="eq-loader"><span /><span /><span /><span /></span> Converting…</>
+                    ) : isTuningVocal ? (
+                      <><Loader2 className="animate-spin" /> Tuning your take…</>
                     ) : (
                       <>
                         <Sparkles /> Convert song
