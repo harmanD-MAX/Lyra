@@ -178,6 +178,12 @@ def analyse_f0_rmvpe(y: np.ndarray, sr: int):
         root = os.environ.get("rmvpe_root", os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets"))
         path = os.path.join(root, "rmvpe.pt")
         if not os.path.exists(path):
+            # Seed-VC renders never load RVC, so RMVPE may not be on disk yet
+            import model_downloader
+            url = model_downloader.RVC_BASE_FILES.get(os.path.join(model_downloader.ASSETS_DIR, "rmvpe.pt"))
+            if url and os.path.abspath(root) == os.path.abspath(model_downloader.ASSETS_DIR):
+                model_downloader._download_file(url, path)
+        if not os.path.exists(path):
             raise FileNotFoundError(path)
         config = Config()
         model = RMVPE(path, is_half=config.is_half, device=config.device)
@@ -257,8 +263,9 @@ def polish_output_pitch(
     """
     Final vocal tune on the converted vocal: repair pitch cracks, bring notes into
     key, steady shaky held notes and bloom gentle vibrato on long notes.
-    Pitch is moved with PSOLA, and only notes that actually need moving are replaced,
-    so the rest of the converted vocal is left untouched. Returns {"path", "f0", "fps"}.
+    Pitch is moved with the PC-NSF-HiFiGAN neural vocoder (PSOLA, then WORLD, as fallbacks),
+    and only phrases that actually need moving are replaced, so the rest of the converted
+    vocal is left untouched. Returns {"path", "f0", "fps"}.
     """
     import melody
 
@@ -278,24 +285,38 @@ def polish_output_pitch(
 
     if progress_cb:
         progress_cb(85, "Autotune: in key, steady notes, vibrato on long notes...")
+    y = None
     try:
-        y = _psola_retune(audio, sr, target, fps)
+        import pc_nsf_hifigan
+        voc = pc_nsf_hifigan.revoice(audio.mean(axis=1), sr, target, fps)
+        if voc is not None:
+            y = np.repeat(voc[:, None], audio.shape[1], axis=1)
     except Exception as e:
-        logger.info(f"PSOLA retune unavailable ({e}); using WORLD for the final tune")
-        return retune_world(input_wav, output_wav,
-                            lambda f, _fps: melody.correct_pitch(repair_f0_cracks(f, _fps), fps=_fps, key=key, **SOULFUL_TUNE),
-                            smooth_tone=0.0)
+        logger.warning(f"PC-NSF-HiFiGAN autotune failed ({e}); using PSOLA")
+    if y is None:
+        try:
+            y = _psola_retune(audio, sr, target, fps)
+        except Exception as e:
+            logger.info(f"PSOLA retune unavailable ({e}); using WORLD for the final tune")
+            return retune_world(input_wav, output_wav,
+                                lambda f, _fps: melody.correct_pitch(repair_f0_cracks(f, _fps), fps=_fps, key=key, **SOULFUL_TUNE),
+                                smooth_tone=0.0)
 
-    # Keep the original wherever a note barely moves (< 4 cents) and in all
-    # unvoiced sound (consonants, breaths); crossfade 15 ms in and out
+    # Only sung phrases that actually move (> 4 cents somewhere) are replaced; consonants,
+    # breaths and phrases already in tune keep the original audio. 10 ms crossfades.
     from scipy.ndimage import binary_dilation, uniform_filter1d
     cents = np.zeros_like(target)
     cents[voiced] = 1200.0 * np.abs(np.log2(ratio[voiced]))
-    need = binary_dilation(voiced & (cents > 4.0), iterations=max(1, int(0.03 * fps)))
+    need = np.zeros(len(target), dtype=bool)
+    edges = np.flatnonzero(np.diff(np.concatenate([[0], voiced.astype(np.int8), [0]])))
+    for s0, e0 in zip(edges[::2], edges[1::2]):
+        if np.any(cents[s0:e0] > 4.0):
+            need[s0:e0] = True
+    need = binary_dilation(need, iterations=max(1, int(0.02 * fps)))
     hop = sr / fps
     frame_of_sample = np.minimum((np.arange(len(audio)) / hop).astype(int), len(need) - 1)
-    mask = uniform_filter1d(need[frame_of_sample].astype(np.float32), size=max(1, int(0.015 * sr)))
-    y = audio.astype(np.float32) * (1.0 - mask[:, None]) + y * mask[:, None]
+    mask = uniform_filter1d(need[frame_of_sample].astype(np.float32), size=max(1, int(0.010 * sr)))
+    y = audio.astype(np.float32) * (1.0 - mask[:, None]) + y.astype(np.float32) * mask[:, None]
 
     peak = float(np.max(np.abs(y))) + 1e-9
     if peak > 0.98:
