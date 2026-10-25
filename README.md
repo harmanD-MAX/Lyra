@@ -39,6 +39,16 @@ Sign-in is off until both Firebase and D1 are configured. Once on, the **Log in*
    - In **Project settings → Your apps**, add a **Web app** and copy its `apiKey`, `authDomain`, `projectId` and `appId`.
 3. Copy `backend/.env.example` to `backend/.env` and fill in the D1, Firebase and `LYRA_SESSION_SECRET` values.
 
+On Colab, keep the secrets in **Colab Secrets** (the 🔑 icon in the left sidebar): add `CF_API_TOKEN` and `LYRA_SESSION_SECRET`, give the notebook access, then run:
+
+```python
+import os
+from google.colab import userdata
+os.environ['CF_API_TOKEN'] = userdata.get('CF_API_TOKEN')
+os.environ['LYRA_SESSION_SECRET'] = userdata.get('LYRA_SESSION_SECRET')
+!bash start-colab.sh
+```
+
 The backend creates the tables on startup; the same schema is in `cloudflare/schema.sql`. Songs saved before sign-in was turned on have no owner, so they don't show in anyone's My Songs.
 
 ## Voice engines
