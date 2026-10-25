@@ -2,9 +2,18 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Header from './components/Header';
 import LandingPage from './components/LandingPage';
 import StudioView from './components/StudioView';
+import LoginModal from './components/LoginModal';
+import { useAuth } from './auth';
 import { DEFAULT_CREATIVE, resolveCreative } from './creative';
 
 export default function App() {
+  const auth = useAuth();
+  const needsSignIn = auth.enabled && !auth.user;
+  const [loginOpen, setLoginOpen] = useState(false);
+  const openLogin = useCallback(() => setLoginOpen(true), []);
+  const closeLogin = useCallback(() => setLoginOpen(false), []);
+  const [studioTab, setStudioTab] = useState('studio');
+
   // Navigation view: 'landing' | 'studio'
   const [currentView, setCurrentView] = useState('landing');
 
@@ -62,6 +71,7 @@ export default function App() {
 
   const navigateTo = (view, modelKey, opts = {}) => {
     if (modelKey) setSelectedModel(modelKey);
+    setStudioTab(opts.tab || 'studio');
     if (opts.mode) {
       setCreative((c) => ({ ...c, studioMode: opts.mode }));
       if (opts.mode === 'my_voice' && !modelKey) setSelectedModel('raw');
@@ -96,8 +106,12 @@ export default function App() {
       .catch(() => { });
   };
 
+  // "My Songs" is per account, so reload it whenever the signed-in user changes
   useEffect(() => {
-    fetchRecentJobs();
+    if (!auth.loading) fetchRecentJobs();
+  }, [auth.loading, auth.user?.id]);
+
+  useEffect(() => {
     fetch('/api/info')
       .then(res => res.json())
       .then(data => setSysInfo(data))
@@ -269,10 +283,34 @@ export default function App() {
           <Header
             currentView="landing"
             onViewChange={navigateTo}
+            auth={auth}
+            onLogin={openLogin}
+            onOpenSongs={() => navigateTo('studio', null, { tab: 'my-songs' })}
           />
           <LandingPage
             onLaunchStudio={(modelKey, opts) => navigateTo('studio', modelKey, opts)}
           />
+        </>
+      ) : needsSignIn || auth.loading ? (
+        <>
+          <Header currentView="studio" onViewChange={navigateTo} auth={auth} onLogin={openLogin} />
+          <main className="flex-1 flex flex-col items-center justify-center gap-6 px-6 text-center">
+            {auth.loading ? (
+              <p className="text-white/60">Loading…</p>
+            ) : (
+              <>
+                <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>
+                  Sign in to open the studio
+                </h1>
+                <p className="text-white/60 max-w-md">
+                  Your songs are saved to your account, so you can pick them up on any device.
+                </p>
+                <button type="button" onClick={openLogin} className="btn btn-primary">
+                  Log in
+                </button>
+              </>
+            )}
+          </main>
         </>
       ) : (
         /* View 2: Lyra Studio Page (Exact Tablet Interface from Screenshot) */
@@ -303,9 +341,14 @@ export default function App() {
           onBackToLanding={() => navigateTo('landing')}
           onDeleteJob={handleDeleteJob}
           personalVoices={personalVoices}
+          initialTab={studioTab}
+          auth={auth}
+          onLogin={openLogin}
           onRefreshJobs={fetchRecentJobs}
         />
       )}
+
+      <LoginModal auth={auth} open={loginOpen} onClose={closeLogin} />
 
     </div>
   );

@@ -94,6 +94,13 @@ class JobManager:
                 return True
             return False
 
+    def remember_job(self, job: Dict[str, Any]):
+        """Adds a saved song loaded from elsewhere (D1) so its status and audio routes resolve."""
+        with self._lock:
+            if job.get("id") and job["id"] not in self._jobs:
+                self._jobs[job["id"]] = job
+                self._save()
+
     def sync_cloud_catalog(self):
         try:
             try:

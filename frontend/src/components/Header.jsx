@@ -1,7 +1,8 @@
 import React from 'react';
 import LyraLogo from './LyraLogo';
+import AccountMenu from './AccountMenu';
 
-export default function Header({ currentView = 'landing', onViewChange }) {
+export default function Header({ currentView = 'landing', onViewChange, auth, onLogin, onOpenSongs }) {
   const handleNavigation = (sectionId) => {
     if (currentView !== 'landing') {
       if (onViewChange) onViewChange('landing');
@@ -63,13 +64,22 @@ export default function Header({ currentView = 'landing', onViewChange }) {
         </nav>
 
         {/* Right Action */}
-        <button
-          type="button"
-          onClick={() => onViewChange && onViewChange('studio')}
-          className="btn btn-primary"
-        >
-          Open Studio
-        </button>
+        <div className="flex items-center gap-3">
+          {auth?.user ? (
+            <AccountMenu user={auth.user} onSignOut={auth.signOut} onOpenSongs={onOpenSongs} />
+          ) : auth && !auth.loading ? (
+            <button type="button" onClick={onLogin} className="btn btn-secondary">
+              Log in
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => onViewChange && onViewChange('studio')}
+            className="btn btn-primary"
+          >
+            Open Studio
+          </button>
+        </div>
 
       </div>
     </header>
