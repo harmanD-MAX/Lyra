@@ -32,7 +32,7 @@ cd frontend && npm run dev   # http://localhost:3000
 
 Sign-in is off until both Firebase and D1 are configured. Once on, the **Log in** button opens Google sign-in, and **My Songs** lists every song that account saved. Firebase Authentication only runs the Google popup (free Spark plan, no Google Cloud Console setup). The accounts and the list of who owns which song live in Cloudflare D1, and the audio stays in R2.
 
-1. **D1:** run `npx wrangler d1 create lyra-db` and copy its `database_id`. Then create a Cloudflare API token with **Account → D1 → Edit** permission.
+1. **D1:** run `npx wrangler d1 create lyra-users` and copy its `database_id`. Then create a Cloudflare API token with **Account → D1 → Edit** permission.
 2. **Firebase:** at [console.firebase.google.com](https://console.firebase.google.com), create a project (you can turn Google Analytics off). Then:
    - In **Authentication → Sign-in method**, turn on **Google**.
    - In **Authentication → Settings → Authorized domains**, add the addresses you open Lyra from, e.g. `lyra-studio.loca.lt` (`localhost` is already there).
