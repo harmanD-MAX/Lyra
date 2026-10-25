@@ -62,11 +62,13 @@ cd "$ROOT_DIR/backend"
 rm -f /tmp/uvicorn.log
 python3 -m uvicorn app:app --host 0.0.0.0 --port 8000 > /tmp/uvicorn.log 2>&1 &
 SERVER_PID=$!
+LT_PID=""
 
 cleanup() {
-  kill "$SERVER_PID" 2>/dev/null || true
-  kill "$LT_PID" 2>/dev/null || true
+  [ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null || true
+  [ -n "${LT_PID:-}" ] && kill "$LT_PID" 2>/dev/null || true
   pkill -9 -f "lt --port" 2>/dev/null || true
+  pkill -9 -f "localtunnel" 2>/dev/null || true
   exit 0
 }
 trap cleanup SIGINT SIGTERM EXIT
@@ -90,54 +92,50 @@ if [ "$READY" -eq 0 ]; then
 fi
 echo "✅ Lyra backend is online and responding on port 8000."
 
-# 7. Start localtunnel and lock in https://lyra-studio.loca.lt
+# 7. Start localtunnel
 TARGET_SUBDOMAIN="lyra-studio"
 TARGET_URL="https://${TARGET_SUBDOMAIN}.loca.lt"
 ACTUAL_URL=""
-LT_PID=""
 
-echo "🌐 Connecting tunnel to $TARGET_URL ..."
+echo "🌐 Requesting subdomain $TARGET_URL ..."
+rm -f /tmp/lt.log
+lt --port 8000 --local-host 127.0.0.1 --subdomain "$TARGET_SUBDOMAIN" > /tmp/lt.log 2>&1 &
+LT_PID=$!
 
-for attempt in {1..5}; do
-  pkill -9 -f "lt --port" 2>/dev/null || true
-  sleep 1
-  rm -f /tmp/lt.log
-  lt --port 8000 --local-host 127.0.0.1 --subdomain "$TARGET_SUBDOMAIN" > /tmp/lt.log 2>&1 &
-  LT_PID=$!
-
-  # Wait for localtunnel to assign URL
-  for i in {1..12}; do
-    if grep -q "your url is:" /tmp/lt.log 2>/dev/null; then
-      ACTUAL_URL=$(grep "your url is:" /tmp/lt.log | awk '{print $NF}' | tr -d '\r\n')
-      break
-    fi
-    sleep 1
-  done
-
-  if [ "$ACTUAL_URL" = "$TARGET_URL" ]; then
-    echo "✅ Successfully connected to $TARGET_URL"
+# Wait for localtunnel to assign URL
+for i in {1..15}; do
+  if grep -q "your url is:" /tmp/lt.log 2>/dev/null; then
+    ACTUAL_URL=$(grep "your url is:" /tmp/lt.log | awk '{print $NF}' | tr -d '\r\n')
     break
   fi
-
-  if [ -n "$ACTUAL_URL" ] && [ "$ACTUAL_URL" != "$TARGET_URL" ]; then
-    echo "⚠️  loca.lt temporarily gave '$ACTUAL_URL' instead of '$TARGET_URL' (attempt $attempt/5)."
-    echo "    Releasing session and retrying for '$TARGET_URL' in 2 seconds..."
-    kill "$LT_PID" 2>/dev/null || true
-    sleep 2
-  fi
+  sleep 1
 done
 
-if [ -z "$ACTUAL_URL" ] || [ "$ACTUAL_URL" != "$TARGET_URL" ]; then
+if [ -z "$ACTUAL_URL" ]; then
   ACTUAL_URL="$TARGET_URL"
 fi
 
 echo ""
 echo "============================================================"
 echo " 🚀 LYRA STUDIO IS LIVE & READY!"
-echo " 👉 CLICK THIS LINK TO OPEN: $TARGET_URL"
+echo " 👉 CLICK THIS LINK TO OPEN: $ACTUAL_URL"
 echo " 🔑 ONE-TIME PASSWORD (if prompted): $TUNNEL_PASS"
 echo "============================================================"
+if [ "$ACTUAL_URL" != "$TARGET_URL" ]; then
+  echo ""
+  echo "ℹ️  loca.lt assigned $ACTUAL_URL (lyra-studio is currently held by a previous session)."
+  echo "💡 Tip: In Firebase Console → Authentication → Settings → Authorized domains,"
+  echo "   add 'loca.lt'. This authorizes all localtunnel URLs permanently!"
+fi
 echo ""
 
-# Follow the tunnel log in foreground
-wait $SERVER_PID
+# Keep alive and monitor server + tunnel
+while kill -0 "$SERVER_PID" 2>/dev/null; do
+  if [ -n "$LT_PID" ] && ! kill -0 "$LT_PID" 2>/dev/null; then
+    echo "⚠️ Tunnel disconnected. Reconnecting..."
+    lt --port 8000 --local-host 127.0.0.1 --subdomain "$TARGET_SUBDOMAIN" >> /tmp/lt.log 2>&1 &
+    LT_PID=$!
+  fi
+  sleep 5
+done
+
