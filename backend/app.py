@@ -32,7 +32,19 @@ import voices
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
-OUTPUTS_DIR = os.environ.get("LYRA_OUTPUTS_DIR", os.path.join(BASE_DIR, "outputs"))
+
+# Auto-detect Google Drive in Colab if mounted
+DRIVE_BASE = "/content/drive/MyDrive"
+if os.path.isdir(DRIVE_BASE):
+    if os.path.isdir(os.path.join(DRIVE_BASE, "ysra-songs")):
+        DEFAULT_OUTPUTS_DIR = os.path.join(DRIVE_BASE, "ysra-songs")
+    else:
+        DEFAULT_OUTPUTS_DIR = os.path.join(DRIVE_BASE, "lyra-songs")
+    os.makedirs(DEFAULT_OUTPUTS_DIR, exist_ok=True)
+else:
+    DEFAULT_OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
+
+OUTPUTS_DIR = os.environ.get("LYRA_OUTPUTS_DIR", DEFAULT_OUTPUTS_DIR)
 MODELS_DIR = os.path.join(BASE_DIR, "models", "arijit_singh")
 
 os.makedirs(UPLOADS_DIR, exist_ok=True)

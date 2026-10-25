@@ -5,7 +5,20 @@ import uuid
 import threading
 from typing import Dict, Any, Optional
 
-JOBS_FILE = os.environ.get("LYRA_JOBS_FILE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "jobs_db.json"))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DRIVE_BASE = "/content/drive/MyDrive"
+if os.path.isdir(DRIVE_BASE):
+    if os.path.isdir(os.path.join(DRIVE_BASE, "ysra-songs")):
+        DEFAULT_OUTPUTS_DIR = os.path.join(DRIVE_BASE, "ysra-songs")
+    else:
+        DEFAULT_OUTPUTS_DIR = os.path.join(DRIVE_BASE, "lyra-songs")
+    os.makedirs(DEFAULT_OUTPUTS_DIR, exist_ok=True)
+    DEFAULT_JOBS_FILE = os.path.join(DEFAULT_OUTPUTS_DIR, "jobs_db.json")
+else:
+    DEFAULT_OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
+    DEFAULT_JOBS_FILE = os.path.join(BASE_DIR, "jobs_db.json")
+
+JOBS_FILE = os.environ.get("LYRA_JOBS_FILE", DEFAULT_JOBS_FILE)
 
 class JobManager:
     def __init__(self):
@@ -100,7 +113,7 @@ class JobManager:
     def list_jobs(self, limit: int = 20, completed_only: bool = True, cloud_only: bool = True) -> list:
         self.sync_cloud_catalog()
         with self._lock:
-            outputs_dir = os.environ.get("LYRA_OUTPUTS_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs"))
+            outputs_dir = os.environ.get("LYRA_OUTPUTS_DIR", DEFAULT_OUTPUTS_DIR)
             valid_jobs = []
             for j in self._jobs.values():
                 if completed_only and j.get("status") != "completed":
