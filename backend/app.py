@@ -6,6 +6,7 @@ os.environ.setdefault("RVC_CUDA_GRAPH", "0")
 import time
 import json
 import shutil
+import subprocess
 import threading
 import asyncio
 import traceback
@@ -461,6 +462,7 @@ def run_pipeline(job_id: str, params: "studio_pipeline.JobParams"):
             "engine_label": out["engine_label"],
             "engine_reason": out["engine_reason"],
             "separation_engine": out["separation_engine"],
+            "autotune": out.get("autotune", False),
             "settings": params.to_dict(),
         }
         results["settings"]["singer_name"] = target_name
@@ -564,7 +566,6 @@ async def start_conversion(
     steadiness: float = Form(0.5),
     vibrato: float = Form(0.0),
     harmony: str = Form("none"),
-    output_tune: str = Form("soulful"),
     guide_file: Optional[UploadFile] = File(None),
     guide_url: Optional[str] = Form(None),
     align_timing: bool = Form(True),
@@ -612,7 +613,7 @@ async def start_conversion(
         steadiness=steadiness,
         vibrato=vibrato,
         harmony=harmony,
-        output_tune=output_tune if output_tune in ("off", "natural", "soulful", "strong") else "soulful",
+        autotune=model_name != "raw",
         guide_source_type="file" if guide_file else _url_source(guide_url),
         guide_file_path=_save_upload(guide_file, f"{job_id}_guide") if guide_file else None,
         guide_url=None if guide_file else guide_url,
@@ -1218,6 +1219,69 @@ async def delete_job(job_id: str, request: Request):
     return JSONResponse(content={"status": "deleted", "job_id": job_id})
 
 
+def _find_job_dir(job_id: str, job: Optional[dict]) -> str:
+    """Local folder of a finished job (falls back to its Drive copy)."""
+    drive_folder = (job.get("results") or {}).get("drive_folder") if job else None
+    job_dir = os.path.join(OUTPUTS_DIR, job_id)
+    if not os.path.isdir(job_dir):
+        for cand_dir in [
+            drive_folder,
+            os.path.join(OUTPUTS_DIR, ".internal_jobs", job_id),
+            os.path.join(BASE_DIR, "outputs", job_id),
+            os.path.join("/content/drive/MyDrive/lyra-songs", job_id),
+            os.path.join("/content/drive/MyDrive/lyra-songs", ".internal_jobs", job_id),
+            os.path.join("/content/drive/MyDrive/ysra-songs", job_id)
+        ]:
+            if cand_dir and os.path.isdir(cand_dir):
+                job_dir = cand_dir
+                break
+    return job_dir
+
+
+@app.post("/api/autotune")
+async def toggle_autotune(
+    job_id: str = Form(...),
+    enabled: bool = Form(True),
+    vocal_gain_db: float = Form(0.0),
+    inst_gain_db: float = Form(0.0),
+    reverb_amount: float = Form(0.0),
+    echo_amount: float = Form(0.0),
+):
+    """Switch soulful autotune on the finished lead vocal, then re-mix with the current rack settings."""
+    job = job_manager.get_job(job_id)
+    if not job or job.get("status") != "completed":
+        raise HTTPException(status_code=400, detail="Job must be completed before applying autotune.")
+    job_dir = _find_job_dir(job_id, job)
+    if not os.path.exists(os.path.join(job_dir, "converted_vocals.wav")):
+        raise HTTPException(status_code=404, detail="The converted vocal for this song is not on the server, so autotune can't be applied.")
+    try:
+        await asyncio.to_thread(studio_pipeline.set_autotune, job_dir, enabled)
+    except Exception as e:
+        logger.error(f"Autotune toggle failed for {job_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Autotune failed: {e}")
+
+    # The Clean master is only rebuilt when missing, so drop it to pick up the new vocal
+    for name in ("master_clean.wav", "master_clean.mp3"):
+        try:
+            os.remove(os.path.join(job_dir, name))
+        except FileNotFoundError:
+            pass
+    resp = await quick_remix(job_id=job_id, vocal_gain_db=vocal_gain_db, inst_gain_db=inst_gain_db,
+                             reverb_amount=reverb_amount, echo_amount=echo_amount, warmth=0.55, clarity=0.85,
+                             center_anchor=1.0, presence_boost_db=2.8, apply_autotune=False, autotune_strength=0.0)
+
+    # The player's Solo vocal streams the MP3 preview, which a quick remix does not rebuild
+    proc_wav = os.path.join(job_dir, "vocal_processed.wav")
+    if os.path.exists(proc_wav):
+        await asyncio.to_thread(subprocess.run, ["ffmpeg", "-y", "-i", proc_wav, "-codec:a", "libmp3lame", "-q:a", "4",
+                                                 os.path.join(job_dir, "vocal_processed.mp3")], capture_output=True)
+
+    results = job.get("results") or {}
+    results["autotune"] = enabled
+    job_manager.update_job(job_id, results=results)
+    return resp
+
+
 @app.post("/api/remix")
 async def quick_remix(
     job_id: str = Form(...),
@@ -1240,19 +1304,7 @@ async def quick_remix(
         raise HTTPException(status_code=400, detail="Job must be completed before remixing.")
 
     drive_folder = (job.get("results") or {}).get("drive_folder") if job else None
-    job_dir = os.path.join(OUTPUTS_DIR, job_id)
-    if not os.path.isdir(job_dir):
-        for cand_dir in [
-            drive_folder,
-            os.path.join(OUTPUTS_DIR, ".internal_jobs", job_id),
-            os.path.join(BASE_DIR, "outputs", job_id),
-            os.path.join("/content/drive/MyDrive/lyra-songs", job_id),
-            os.path.join("/content/drive/MyDrive/lyra-songs", ".internal_jobs", job_id),
-            os.path.join("/content/drive/MyDrive/ysra-songs", job_id)
-        ]:
-            if cand_dir and os.path.isdir(cand_dir):
-                job_dir = cand_dir
-                break
+    job_dir = _find_job_dir(job_id, job)
 
     # Locate the vocal stem across all candidate names and locations
     vocal_candidates = [
