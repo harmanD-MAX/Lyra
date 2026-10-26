@@ -220,7 +220,8 @@ def resolve_spotify_track_info(url: str) -> dict:
             logger.warning(f"Spotify Embed extraction error: {e}")
 
     final_title = title or "Spotify Track"
-    query = f"{artist} - {final_title} audio" if artist else f"{final_title} audio"
+    primary_artist = artist.split(",")[0].strip() if artist else ""
+    query = f"{primary_artist} - {final_title} audio" if primary_artist else f"{final_title} audio"
 
     return {
         "title": final_title,
@@ -230,6 +231,34 @@ def resolve_spotify_track_info(url: str) -> dict:
         "query": query,
         "track_id": track_id
     }
+
+
+def _get_yt_dlp_opts(out_template: Optional[str] = None) -> dict:
+    node_path = shutil.which("node") or "/opt/homebrew/bin/node"
+    opts = {
+        'format': 'ba/bestaudio/b',
+        'noplaylist': True,
+        'extract_flat': False,
+        'socket_timeout': 20,
+        'retries': 5,
+        'fragment_retries': 5,
+        'quiet': True,
+        'no_warnings': True,
+    }
+    if node_path and os.path.exists(node_path):
+        opts['js_runtimes'] = {'node': {'path': node_path}}
+    if out_template:
+        opts['outtmpl'] = out_template
+        opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'wav',
+            'preferredquality': '192',
+        }]
+        opts['postprocessor_args'] = [
+            '-ar', '44100',
+            '-ac', '2'
+        ]
+    return opts
 
 
 def download_spotify_audio(url: str, output_dir: str, progress_cb=None) -> dict:
@@ -250,50 +279,67 @@ def download_spotify_audio(url: str, output_dir: str, progress_cb=None) -> dict:
     display_title = f"{artist} - {title}" if artist else title
 
     if progress_cb:
-        progress_cb(12, f"Matched '{display_title[:38]}'... Searching audio stream...")
+        progress_cb(12, f"Matched '{display_title[:38]}'...")
 
-    search_query = meta.get("query") or (f"{artist} - {title} audio" if artist else f"{title} audio")
-    yt_search_target = f"ytsearch1:{search_query}"
+    primary_artist = artist.split(",")[0].strip() if artist else ""
+    queries = [
+        f"{primary_artist} {title} audio".strip(),
+        f"{artist} {title} audio".strip(),
+        f"{title} audio".strip(),
+    ]
+    queries = list(dict.fromkeys([q for q in queries if q]))
 
     os.makedirs(output_dir, exist_ok=True)
     out_template = os.path.join(output_dir, "input_audio.%(ext)s")
-
-    ydl_opts = {
-        'format': 'ba/bestaudio/b',
-        'outtmpl': out_template,
-        'noplaylist': True,
-        'extract_flat': False,
-        'socket_timeout': 15,
-        'retries': 5,
-        'fragment_retries': 5,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'web']
-            }
-        },
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'wav',
-            'preferredquality': '192',
-        }],
-        'postprocessor_args': [
-            '-ar', '44100',
-            '-ac', '2'
-        ],
-        'quiet': True,
-        'no_warnings': True,
-    }
+    dl_opts = _get_yt_dlp_opts(out_template)
 
     if progress_cb:
-        progress_cb(18, "Downloading high-fidelity audio stream...")
+        progress_cb(18, "Downloading audio stream with candidate fallback...")
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(yt_search_target, download=True)
-        if not duration:
-            if 'entries' in info and len(info['entries']) > 0:
-                duration = info['entries'][0].get('duration', 0)
-            else:
-                duration = info.get('duration', 0)
+    # Search for top candidates across queries with automatic fallback
+    candidate_ids = []
+    search_opts = {**_get_yt_dlp_opts(), 'extract_flat': True}
+    with yt_dlp.YoutubeDL(search_opts) as ydl:
+        for q in queries:
+            try:
+                res = ydl.extract_info(f"ytsearch5:{q}", download=False)
+                if res and "entries" in res:
+                    for entry in res["entries"]:
+                        if entry and entry.get("id") and entry["id"] not in candidate_ids:
+                            candidate_ids.append(entry["id"])
+                if len(candidate_ids) >= 5:
+                    break
+            except Exception as e:
+                logger.warning(f"Search query '{q}' error: {e}")
+
+    downloaded = False
+    last_err = None
+
+    for vid in candidate_ids:
+        candidate_url = f"https://www.youtube.com/watch?v={vid}"
+        try:
+            with yt_dlp.YoutubeDL(dl_opts) as dl_ydl:
+                info = dl_ydl.extract_info(candidate_url, download=True)
+                if not duration:
+                    duration = info.get("duration", 0)
+                downloaded = True
+                logger.info(f"Successfully downloaded stream for '{display_title}' via candidate {vid}")
+                break
+        except Exception as e:
+            logger.warning(f"Candidate {vid} failed ({e}), trying next candidate...")
+            last_err = e
+            continue
+
+    if not downloaded:
+        try:
+            with yt_dlp.YoutubeDL(dl_opts) as ydl:
+                info = ydl.extract_info(f"ytsearch1:{queries[0]}", download=True)
+                downloaded = True
+        except Exception as e:
+            last_err = e
+
+    if not downloaded:
+        raise RuntimeError(f"Could not download audio stream for Spotify track '{display_title}': {last_err}")
 
     wav_path = os.path.join(output_dir, "input_audio.wav")
     if not os.path.exists(wav_path):
@@ -341,42 +387,23 @@ def download_youtube_audio(url: str, output_dir: str, progress_cb=None) -> dict:
     if progress_cb:
         progress_cb(10, "Fetching YouTube video metadata...")
 
-    ydl_opts = {
-        'format': 'ba/bestaudio/b',
-        'outtmpl': out_template,
-        'noplaylist': True,
-        'extract_flat': False,
-        'socket_timeout': 15,
-        'retries': 5,
-        'fragment_retries': 5,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'web']
-            }
-        },
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'wav',
-            'preferredquality': '192',
-        }],
-        'postprocessor_args': [
-            '-ar', '44100',
-            '-ac', '2'
-        ],
-        'quiet': True,
-        'no_warnings': True,
-    }
+    ydl_opts = _get_yt_dlp_opts(out_template)
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        title = info.get('title', 'YouTube Audio')
-        duration = info.get('duration', 0)
-        thumbnail = info.get('thumbnail', '')
-        uploader = info.get('uploader', 'Unknown Artist')
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get('title', 'YouTube Audio')
+            duration = info.get('duration', 0)
+            thumbnail = info.get('thumbnail', '')
+            uploader = info.get('uploader', 'Unknown Artist')
+    except Exception as e:
+        err_msg = str(e)
+        if "Sign in to confirm" in err_msg or "unavailable" in err_msg.lower():
+            raise RuntimeError("YouTube video is unavailable, deleted (404), or restricted. Please try another link or upload the audio directly.")
+        raise RuntimeError(f"Failed to download YouTube audio: {err_msg}")
         
     wav_path = os.path.join(output_dir, "input_audio.wav")
     if not os.path.exists(wav_path):
-        # Fallback search for any wav in output_dir
         for f in os.listdir(output_dir):
             if f.endswith(".wav"):
                 wav_path = os.path.join(output_dir, f)
