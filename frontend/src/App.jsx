@@ -154,6 +154,11 @@ export default function App() {
             setIsSubmitting(false);
             fetchRecentJobs();
           }
+          if (job.status === 'error') {
+            // Back to the song form (the take is kept) with the reason, instead of an empty screen
+            setErrorMsg(`Conversion failed: ${job.error || job.message || 'unknown error'}`);
+            setActiveJobId(null);
+          }
         })
         .catch(err => {
           console.error("Status polling failed:", err);
