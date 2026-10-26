@@ -1367,16 +1367,12 @@ def _apply_dolby_3d_spatial_and_hall_goonj(
     presence_boost_db: float = 2.8
 ) -> np.ndarray:
     """
-    Send-style vocal space that keeps the singer's real tone:
-    1. The dry lead vocal is never filtered, delayed or widened. It stays mono and dead-centre,
-       so the timbre matches the Clean Natural master exactly.
-    2. Hall reverb runs on a separate send: band-limited (180 Hz - 7 kHz), 40 ms pre-delay so the
-       dry consonants stay in front, and ducked while the singer is singing so the tail fills the
-       gaps between phrases instead of smearing the words.
-    3. `echo_amount` (Stereo depth) adds a few early reflections to the send and widens only the
-       wet return. No Haas delay is ever applied to the lead.
-    `center_anchor` and `presence_boost_db` are kept for API compatibility; they used to colour the
-    lead and are no longer applied.
+    Lush vocal space that wraps around and over the vocals:
+    1. Reverb envelops the lead vocals in real time without aggressive ducking suppression,
+       giving the singer a continuous, rich acoustic aura over the entire song.
+    2. Silky air sheen (up to 9.2 kHz) and tight 12 ms pre-delay ensure the hall reverb
+       sits right over the vocal body rather than lagging behind the music.
+    3. Spatial depth applies wide 3D acoustic reflections and stereo air across the vocal soundstage.
     """
     if vocal.ndim == 1:
         vocal = np.column_stack([vocal, vocal])
@@ -1392,65 +1388,67 @@ def _apply_dolby_3d_spatial_and_hall_goonj(
 
     v_mono = ((dry[:, 0] + dry[:, 1]) * 0.5).astype(np.float32)
 
-    # Send EQ: keep rumble, chest boom and sibilance out of the effects
-    sos_send = signal.butter(2, [180, 7000], 'bandpass', fs=sr, output='sos')
+    # Send EQ: keep sub-rumble out, but preserve vocal body and airy presence (120 Hz - 10.5 kHz)
+    sos_send = signal.butter(2, [120, 10500], 'bandpass', fs=sr, output='sos')
     send = signal.sosfilt(sos_send, v_mono).astype(np.float32)
 
     wet = np.zeros((n_samples, 2), dtype=np.float32)
 
-    # --- Early reflections (Stereo depth): on the send only, never on the dry lead ---
+    # --- Early reflections & 3D Spatial Depth (over vocal soundstage) ---
     if echo_amount > 0.01:
         ambient_taps = [
-            (0.029, 0.30, 0.75, 0.25),
-            (0.047, 0.24, 0.25, 0.75),
-            (0.083, 0.16, 0.60, 0.40),
-            (0.131, 0.10, 0.40, 0.60),
+            (0.016, 0.35, 0.80, 0.20),
+            (0.029, 0.28, 0.20, 0.80),
+            (0.052, 0.20, 0.65, 0.35),
+            (0.088, 0.14, 0.35, 0.65),
         ]
         for d_sec, gain, pan_l, pan_r in ambient_taps:
             d_s = int(sr * d_sec)
             if d_s < n_samples:
-                tap = send[:-d_s] * (gain * echo_amount * 2.2)
+                tap = send[:-d_s] * (gain * echo_amount * 2.8)
                 wet[d_s:, 0] += tap * pan_l
                 wet[d_s:, 1] += tap * pan_r
 
-    # --- Hall reverb: 40 ms pre-delay, warm damping ---
+    # --- Hall Reverb: tight 12 ms pre-delay, lush air sheen over the vocal ---
     if reverb_amount > 0.01:
         try:
-            ir = _get_or_create_hall_ir(sr=sr, duration=2.4)
+            ir = _get_or_create_hall_ir(sr=sr, duration=2.5)
             if ir is not None and len(ir) > 0:
-                pre = int(sr * 0.040)
+                pre = int(sr * 0.012)  # Tight 12ms pre-delay so reverb wraps over vocal directly
                 delayed = np.zeros(n_samples, dtype=np.float32)
                 if pre < n_samples:
                     delayed[pre:] = send[:-pre] if pre > 0 else send
                 hall = np.zeros((n_samples, 2), dtype=np.float32)
                 hall[:, 0] = signal.fftconvolve(delayed, ir[:, 0].astype(np.float32), mode='full')[:n_samples]
                 hall[:, 1] = signal.fftconvolve(delayed, ir[:, 1].astype(np.float32), mode='full')[:n_samples]
-                # Gentle low-mid body on the tail only (never on the lead)
-                sos_warmth = signal.butter(2, [240, 480], 'bandpass', fs=sr, output='sos')
-                hall += signal.sosfilt(sos_warmth, hall, axis=0).astype(np.float32) * (0.16 * warmth)
-                sos_hall_damp = signal.butter(2, 4500, 'lp', fs=sr, output='sos')
+                
+                # Warmth in low-mids + silky air filter up to 9.2 kHz (not muffled at 4.5 kHz)
+                sos_warmth = signal.butter(2, [240, 500], 'bandpass', fs=sr, output='sos')
+                hall += signal.sosfilt(sos_warmth, hall, axis=0).astype(np.float32) * (0.18 * warmth)
+                sos_hall_damp = signal.butter(2, 9200, 'lp', fs=sr, output='sos')
                 hall = signal.sosfilt(sos_hall_damp, hall, axis=0).astype(np.float32)
-                # IR is energy-normalised per second; rescale to unit energy so 5% reverb sits
-                # about -18 dB under the dry lead (25% ~ -4 dB)
+                
+                # Rescale and add to wet return over the vocal
                 hall /= math.sqrt(sr)
-                wet += hall * (reverb_amount * 2.4)
+                wet += hall * (reverb_amount * 3.0)
                 del hall, delayed
         except (MemoryError, Exception) as conv_err:
-            logger.warning(f"Convolution reverb memory fallback: {conv_err}")
+            logger.warning(f"Convolution reverb fallback: {conv_err}")
 
-    # Duck the wet return while the singer is singing (up to -6 dB), release into the gaps
-    env = uniform_filter1d(np.abs(v_mono), size=int(sr * 0.05))
-    env_ref = np.percentile(env, 95) + 1e-7
-    duck = 1.0 - 0.5 * np.clip(env / env_ref, 0.0, 1.0)
-    duck = uniform_filter1d(duck, size=int(sr * 0.12)).astype(np.float32)
-    wet *= duck[:, None]
-
-    # Width lives in the wet return only: scale its side signal with Stereo depth
-    width = 1.0 + 4.0 * min(max(echo_amount, 0.0), 0.15)
+    # Reverb stays present over the singing vocal; widen wet aura with Spatial depth
+    width = 1.0 + 5.0 * min(max(echo_amount, 0.0), 0.15)
     w_mid = (wet[:, 0] + wet[:, 1]) * 0.5
     w_side = (wet[:, 0] - wet[:, 1]) * 0.5 * width
     wet[:, 0] = w_mid + w_side
     wet[:, 1] = w_mid - w_side
+
+    # If spatial depth is active, give vocal itself a gentle acoustic widening over the music
+    if echo_amount > 0.01:
+        vocal_side_boost = min(max(echo_amount, 0.0), 0.15) * 0.35
+        v_mid = (dry[:, 0] + dry[:, 1]) * 0.5
+        v_side = (dry[:, 0] - dry[:, 1]) * 0.5
+        dry[:, 0] = v_mid + v_side * (1.0 + vocal_side_boost)
+        dry[:, 1] = v_mid - v_side * (1.0 + vocal_side_boost)
 
     out_vocal = dry + wet
     del wet, send
