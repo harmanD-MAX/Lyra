@@ -1255,6 +1255,14 @@ async def toggle_autotune(
     job_dir = _find_job_dir(job_id, job)
     if not os.path.exists(os.path.join(job_dir, "converted_vocals.wav")):
         raise HTTPException(status_code=404, detail="The converted vocal for this song is not on the server, so autotune can't be applied.")
+
+    # Clear lingering VC caches & GPU buffers to give maximum headroom for autotune vocoding
+    try:
+        audio_processor.unload_vc_cache()
+        audio_processor.clear_memory()
+    except Exception:
+        pass
+
     try:
         await asyncio.to_thread(studio_pipeline.set_autotune, job_dir, enabled)
     except Exception as e:

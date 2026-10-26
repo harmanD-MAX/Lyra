@@ -1027,7 +1027,8 @@ export default function StudioView({
         reloadStems(['master', 'vocal_arijit']);
       } else {
         const errJson = await res.json().catch(() => ({}));
-        alert(`Autotune failed: ${errJson.detail || 'Server error while applying autotune'}`);
+        const timeoutNote = res.status === 504 ? "Request timed out on the tunnel connection (the song may be taking too long to process)." : "";
+        alert(`Autotune failed: ${errJson.detail || timeoutNote || 'Server error while applying autotune'}`);
       }
     } catch (err) {
       console.error('Autotune failed:', err);
