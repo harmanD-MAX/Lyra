@@ -72,7 +72,7 @@ export default function ProcessingStatus({ job, selectedModel, onReset }) {
                 {isCompleted && <>Ready — sung by <span className="font-accent text-[#e5a958]">{singerName}</span></>}
                 {isError && 'The render stopped'}
               </h3>
-              <p className="mt-1 text-sm text-white/55 truncate">{job.message || 'Running the voice pipeline…'}</p>
+              <p className={`mt-1 text-sm truncate ${isError ? "text-rose-300 font-medium" : "text-white/55"}`}>{isError ? (job.error || job.message || 'An error occurred during rendering.') : (job.message || 'Running the voice pipeline…')}</p>
             </div>
 
             {onReset && (
@@ -90,7 +90,7 @@ export default function ProcessingStatus({ job, selectedModel, onReset }) {
                 className="btn btn-secondary btn-sm shrink-0"
                 title="Cancel and remove from queue"
               >
-                <X /> Cancel
+                <X /> {isError ? 'Dismiss' : 'Cancel'}
               </button>
             )}
           </div>

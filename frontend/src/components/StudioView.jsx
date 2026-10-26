@@ -1512,7 +1512,7 @@ export default function StudioView({
             <div className="w-full md:h-full flex flex-col gap-3 md:overflow-hidden animate-fadeIn">
 
               {/* Rendering: live pipeline status */}
-              {isSubmitting && currentJob && (
+              {(isSubmitting || currentJob?.status === 'error') && currentJob && (
                 <div className="animate-fadeIn my-auto max-w-4xl w-full mx-auto">
                   <ProcessingStatus job={currentJob} selectedModel={selectedModel} onReset={onResetJob} />
                 </div>
