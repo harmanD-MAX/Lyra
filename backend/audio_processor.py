@@ -220,7 +220,8 @@ def resolve_spotify_track_info(url: str) -> dict:
             logger.warning(f"Spotify Embed extraction error: {e}")
 
     final_title = title or "Spotify Track"
-    query = f"{artist} - {final_title} audio" if artist else f"{final_title} audio"
+    primary_artist = artist.split(",")[0].strip() if artist else ""
+    query = f"{primary_artist} - {final_title} audio" if primary_artist else f"{final_title} audio"
 
     return {
         "title": final_title,
@@ -230,6 +231,34 @@ def resolve_spotify_track_info(url: str) -> dict:
         "query": query,
         "track_id": track_id
     }
+
+
+def _get_yt_dlp_opts(out_template: Optional[str] = None) -> dict:
+    node_path = shutil.which("node") or "/opt/homebrew/bin/node"
+    opts = {
+        'format': 'ba/bestaudio/b',
+        'noplaylist': True,
+        'extract_flat': False,
+        'socket_timeout': 20,
+        'retries': 5,
+        'fragment_retries': 5,
+        'quiet': True,
+        'no_warnings': True,
+    }
+    if node_path and os.path.exists(node_path):
+        opts['js_runtimes'] = {'node': {'path': node_path}}
+    if out_template:
+        opts['outtmpl'] = out_template
+        opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'wav',
+            'preferredquality': '192',
+        }]
+        opts['postprocessor_args'] = [
+            '-ar', '44100',
+            '-ac', '2'
+        ]
+    return opts
 
 
 def download_spotify_audio(url: str, output_dir: str, progress_cb=None) -> dict:
@@ -250,50 +279,67 @@ def download_spotify_audio(url: str, output_dir: str, progress_cb=None) -> dict:
     display_title = f"{artist} - {title}" if artist else title
 
     if progress_cb:
-        progress_cb(12, f"Matched '{display_title[:38]}'... Searching audio stream...")
+        progress_cb(12, f"Matched '{display_title[:38]}'...")
 
-    search_query = meta.get("query") or (f"{artist} - {title} audio" if artist else f"{title} audio")
-    yt_search_target = f"ytsearch1:{search_query}"
+    primary_artist = artist.split(",")[0].strip() if artist else ""
+    queries = [
+        f"{primary_artist} {title} audio".strip(),
+        f"{artist} {title} audio".strip(),
+        f"{title} audio".strip(),
+    ]
+    queries = list(dict.fromkeys([q for q in queries if q]))
 
     os.makedirs(output_dir, exist_ok=True)
     out_template = os.path.join(output_dir, "input_audio.%(ext)s")
-
-    ydl_opts = {
-        'format': 'ba/bestaudio/b',
-        'outtmpl': out_template,
-        'noplaylist': True,
-        'extract_flat': False,
-        'socket_timeout': 15,
-        'retries': 5,
-        'fragment_retries': 5,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'web']
-            }
-        },
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'wav',
-            'preferredquality': '192',
-        }],
-        'postprocessor_args': [
-            '-ar', '44100',
-            '-ac', '2'
-        ],
-        'quiet': True,
-        'no_warnings': True,
-    }
+    dl_opts = _get_yt_dlp_opts(out_template)
 
     if progress_cb:
-        progress_cb(18, "Downloading high-fidelity audio stream...")
+        progress_cb(18, "Downloading audio stream with candidate fallback...")
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(yt_search_target, download=True)
-        if not duration:
-            if 'entries' in info and len(info['entries']) > 0:
-                duration = info['entries'][0].get('duration', 0)
-            else:
-                duration = info.get('duration', 0)
+    # Search for top candidates across queries with automatic fallback
+    candidate_ids = []
+    search_opts = {**_get_yt_dlp_opts(), 'extract_flat': True}
+    with yt_dlp.YoutubeDL(search_opts) as ydl:
+        for q in queries:
+            try:
+                res = ydl.extract_info(f"ytsearch5:{q}", download=False)
+                if res and "entries" in res:
+                    for entry in res["entries"]:
+                        if entry and entry.get("id") and entry["id"] not in candidate_ids:
+                            candidate_ids.append(entry["id"])
+                if len(candidate_ids) >= 5:
+                    break
+            except Exception as e:
+                logger.warning(f"Search query '{q}' error: {e}")
+
+    downloaded = False
+    last_err = None
+
+    for vid in candidate_ids:
+        candidate_url = f"https://www.youtube.com/watch?v={vid}"
+        try:
+            with yt_dlp.YoutubeDL(dl_opts) as dl_ydl:
+                info = dl_ydl.extract_info(candidate_url, download=True)
+                if not duration:
+                    duration = info.get("duration", 0)
+                downloaded = True
+                logger.info(f"Successfully downloaded stream for '{display_title}' via candidate {vid}")
+                break
+        except Exception as e:
+            logger.warning(f"Candidate {vid} failed ({e}), trying next candidate...")
+            last_err = e
+            continue
+
+    if not downloaded:
+        try:
+            with yt_dlp.YoutubeDL(dl_opts) as ydl:
+                info = ydl.extract_info(f"ytsearch1:{queries[0]}", download=True)
+                downloaded = True
+        except Exception as e:
+            last_err = e
+
+    if not downloaded:
+        raise RuntimeError(f"Could not download audio stream for Spotify track '{display_title}': {last_err}")
 
     wav_path = os.path.join(output_dir, "input_audio.wav")
     if not os.path.exists(wav_path):
@@ -341,42 +387,23 @@ def download_youtube_audio(url: str, output_dir: str, progress_cb=None) -> dict:
     if progress_cb:
         progress_cb(10, "Fetching YouTube video metadata...")
 
-    ydl_opts = {
-        'format': 'ba/bestaudio/b',
-        'outtmpl': out_template,
-        'noplaylist': True,
-        'extract_flat': False,
-        'socket_timeout': 15,
-        'retries': 5,
-        'fragment_retries': 5,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'web']
-            }
-        },
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'wav',
-            'preferredquality': '192',
-        }],
-        'postprocessor_args': [
-            '-ar', '44100',
-            '-ac', '2'
-        ],
-        'quiet': True,
-        'no_warnings': True,
-    }
+    ydl_opts = _get_yt_dlp_opts(out_template)
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        title = info.get('title', 'YouTube Audio')
-        duration = info.get('duration', 0)
-        thumbnail = info.get('thumbnail', '')
-        uploader = info.get('uploader', 'Unknown Artist')
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get('title', 'YouTube Audio')
+            duration = info.get('duration', 0)
+            thumbnail = info.get('thumbnail', '')
+            uploader = info.get('uploader', 'Unknown Artist')
+    except Exception as e:
+        err_msg = str(e)
+        if "Sign in to confirm" in err_msg or "unavailable" in err_msg.lower():
+            raise RuntimeError("YouTube video is unavailable, deleted (404), or restricted. Please try another link or upload the audio directly.")
+        raise RuntimeError(f"Failed to download YouTube audio: {err_msg}")
         
     wav_path = os.path.join(output_dir, "input_audio.wav")
     if not os.path.exists(wav_path):
-        # Fallback search for any wav in output_dir
         for f in os.listdir(output_dir):
             if f.endswith(".wav"):
                 wav_path = os.path.join(output_dir, f)
@@ -1340,16 +1367,12 @@ def _apply_dolby_3d_spatial_and_hall_goonj(
     presence_boost_db: float = 2.8
 ) -> np.ndarray:
     """
-    Send-style vocal space that keeps the singer's real tone:
-    1. The dry lead vocal is never filtered, delayed or widened. It stays mono and dead-centre,
-       so the timbre matches the Clean Natural master exactly.
-    2. Hall reverb runs on a separate send: band-limited (180 Hz - 7 kHz), 40 ms pre-delay so the
-       dry consonants stay in front, and ducked while the singer is singing so the tail fills the
-       gaps between phrases instead of smearing the words.
-    3. `echo_amount` (Stereo depth) adds a few early reflections to the send and widens only the
-       wet return. No Haas delay is ever applied to the lead.
-    `center_anchor` and `presence_boost_db` are kept for API compatibility; they used to colour the
-    lead and are no longer applied.
+    Lush vocal space that wraps around and over the vocals:
+    1. Reverb envelops the lead vocals in real time without aggressive ducking suppression,
+       giving the singer a continuous, rich acoustic aura over the entire song.
+    2. Silky air sheen (up to 9.2 kHz) and tight 12 ms pre-delay ensure the hall reverb
+       sits right over the vocal body rather than lagging behind the music.
+    3. Spatial depth applies wide 3D acoustic reflections and stereo air across the vocal soundstage.
     """
     if vocal.ndim == 1:
         vocal = np.column_stack([vocal, vocal])
@@ -1365,65 +1388,67 @@ def _apply_dolby_3d_spatial_and_hall_goonj(
 
     v_mono = ((dry[:, 0] + dry[:, 1]) * 0.5).astype(np.float32)
 
-    # Send EQ: keep rumble, chest boom and sibilance out of the effects
-    sos_send = signal.butter(2, [180, 7000], 'bandpass', fs=sr, output='sos')
+    # Send EQ: keep sub-rumble out, but preserve vocal body and airy presence (120 Hz - 10.5 kHz)
+    sos_send = signal.butter(2, [120, 10500], 'bandpass', fs=sr, output='sos')
     send = signal.sosfilt(sos_send, v_mono).astype(np.float32)
 
     wet = np.zeros((n_samples, 2), dtype=np.float32)
 
-    # --- Early reflections (Stereo depth): on the send only, never on the dry lead ---
+    # --- Early reflections & 3D Spatial Depth (over vocal soundstage) ---
     if echo_amount > 0.01:
         ambient_taps = [
-            (0.029, 0.30, 0.75, 0.25),
-            (0.047, 0.24, 0.25, 0.75),
-            (0.083, 0.16, 0.60, 0.40),
-            (0.131, 0.10, 0.40, 0.60),
+            (0.016, 0.35, 0.80, 0.20),
+            (0.029, 0.28, 0.20, 0.80),
+            (0.052, 0.20, 0.65, 0.35),
+            (0.088, 0.14, 0.35, 0.65),
         ]
         for d_sec, gain, pan_l, pan_r in ambient_taps:
             d_s = int(sr * d_sec)
             if d_s < n_samples:
-                tap = send[:-d_s] * (gain * echo_amount * 2.2)
+                tap = send[:-d_s] * (gain * echo_amount * 2.8)
                 wet[d_s:, 0] += tap * pan_l
                 wet[d_s:, 1] += tap * pan_r
 
-    # --- Hall reverb: 40 ms pre-delay, warm damping ---
+    # --- Hall Reverb: tight 12 ms pre-delay, lush air sheen over the vocal ---
     if reverb_amount > 0.01:
         try:
-            ir = _get_or_create_hall_ir(sr=sr, duration=2.4)
+            ir = _get_or_create_hall_ir(sr=sr, duration=2.5)
             if ir is not None and len(ir) > 0:
-                pre = int(sr * 0.040)
+                pre = int(sr * 0.012)  # Tight 12ms pre-delay so reverb wraps over vocal directly
                 delayed = np.zeros(n_samples, dtype=np.float32)
                 if pre < n_samples:
                     delayed[pre:] = send[:-pre] if pre > 0 else send
                 hall = np.zeros((n_samples, 2), dtype=np.float32)
                 hall[:, 0] = signal.fftconvolve(delayed, ir[:, 0].astype(np.float32), mode='full')[:n_samples]
                 hall[:, 1] = signal.fftconvolve(delayed, ir[:, 1].astype(np.float32), mode='full')[:n_samples]
-                # Gentle low-mid body on the tail only (never on the lead)
-                sos_warmth = signal.butter(2, [240, 480], 'bandpass', fs=sr, output='sos')
-                hall += signal.sosfilt(sos_warmth, hall, axis=0).astype(np.float32) * (0.16 * warmth)
-                sos_hall_damp = signal.butter(2, 4500, 'lp', fs=sr, output='sos')
+                
+                # Warmth in low-mids + silky air filter up to 9.2 kHz (not muffled at 4.5 kHz)
+                sos_warmth = signal.butter(2, [240, 500], 'bandpass', fs=sr, output='sos')
+                hall += signal.sosfilt(sos_warmth, hall, axis=0).astype(np.float32) * (0.18 * warmth)
+                sos_hall_damp = signal.butter(2, 9200, 'lp', fs=sr, output='sos')
                 hall = signal.sosfilt(sos_hall_damp, hall, axis=0).astype(np.float32)
-                # IR is energy-normalised per second; rescale to unit energy so 5% reverb sits
-                # about -18 dB under the dry lead (25% ~ -4 dB)
+                
+                # Rescale and add to wet return over the vocal
                 hall /= math.sqrt(sr)
-                wet += hall * (reverb_amount * 2.4)
+                wet += hall * (reverb_amount * 3.0)
                 del hall, delayed
         except (MemoryError, Exception) as conv_err:
-            logger.warning(f"Convolution reverb memory fallback: {conv_err}")
+            logger.warning(f"Convolution reverb fallback: {conv_err}")
 
-    # Duck the wet return while the singer is singing (up to -6 dB), release into the gaps
-    env = uniform_filter1d(np.abs(v_mono), size=int(sr * 0.05))
-    env_ref = np.percentile(env, 95) + 1e-7
-    duck = 1.0 - 0.5 * np.clip(env / env_ref, 0.0, 1.0)
-    duck = uniform_filter1d(duck, size=int(sr * 0.12)).astype(np.float32)
-    wet *= duck[:, None]
-
-    # Width lives in the wet return only: scale its side signal with Stereo depth
-    width = 1.0 + 4.0 * min(max(echo_amount, 0.0), 0.15)
+    # Reverb stays present over the singing vocal; widen wet aura with Spatial depth
+    width = 1.0 + 5.0 * min(max(echo_amount, 0.0), 0.15)
     w_mid = (wet[:, 0] + wet[:, 1]) * 0.5
     w_side = (wet[:, 0] - wet[:, 1]) * 0.5 * width
     wet[:, 0] = w_mid + w_side
     wet[:, 1] = w_mid - w_side
+
+    # If spatial depth is active, give vocal itself a gentle acoustic widening over the music
+    if echo_amount > 0.01:
+        vocal_side_boost = min(max(echo_amount, 0.0), 0.15) * 0.35
+        v_mid = (dry[:, 0] + dry[:, 1]) * 0.5
+        v_side = (dry[:, 0] - dry[:, 1]) * 0.5
+        dry[:, 0] = v_mid + v_side * (1.0 + vocal_side_boost)
+        dry[:, 1] = v_mid - v_side * (1.0 + vocal_side_boost)
 
     out_vocal = dry + wet
     del wet, send

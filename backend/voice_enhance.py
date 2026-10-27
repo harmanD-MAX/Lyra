@@ -189,14 +189,37 @@ def analyse_f0_rmvpe(y: np.ndarray, sr: int):
         model = RMVPE(path, is_half=config.is_half, device=config.device)
         mono = y.astype(np.float32) if y.ndim == 1 else y.mean(axis=1).astype(np.float32)
         y16 = librosa.resample(mono, orig_sr=sr, target_sr=16000) if sr != 16000 else mono
+        total_samples = len(y16)
+        chunk_samples = 16000 * 50
+        overlap_samples = 16000 * 2
+        hop = 160
+        half_overlap_frames = int((overlap_samples / 2) / hop)
+
         with torch.no_grad():
-            f0 = model.infer_from_audio(y16, thred=0.03).astype(np.float64)
+            if total_samples <= chunk_samples:
+                f0 = model.infer_from_audio(y16, thred=0.03).astype(np.float64)
+            else:
+                step = chunk_samples - overlap_samples
+                f0_parts = []
+                start = 0
+                while start < total_samples:
+                    end = min(total_samples, start + chunk_samples)
+                    chunk = y16[start:end]
+                    chunk_f0 = model.infer_from_audio(chunk, thred=0.03).astype(np.float64)
+                    s_idx = half_overlap_frames if start > 0 else 0
+                    e_idx = -half_overlap_frames if end < total_samples else None
+                    f0_parts.append(chunk_f0[s_idx:e_idx])
+                    if end == total_samples:
+                        break
+                    start += step
+                f0 = np.concatenate(f0_parts)
+
         del model
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         return f0, 100.0
     except Exception as e:
-        logger.info(f"RMVPE unavailable for the final tune ({e}); using harvest")
+        logger.warning(f"RMVPE unavailable for the final tune ({e}); using harvest")
         return analyse_f0(y, sr), 1000.0 / FRAME_PERIOD_MS
 
 
