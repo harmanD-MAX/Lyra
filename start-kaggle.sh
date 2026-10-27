@@ -43,6 +43,12 @@ elif ! command -v lt >/dev/null 2>&1; then
   npm install -g localtunnel >/dev/null 2>&1
 fi
 
+# localtunnel corrupts uploaded audio when it rewrites the Host header; swap in the byte-safe version
+LT_FIX_TARGET="$(npm root -g 2>/dev/null || true)/localtunnel/lib/HeaderHostTransformer.js"
+if [ -f "$LT_FIX_TARGET" ]; then
+  cp "$ROOT_DIR/tools/localtunnel-host-fix.js" "$LT_FIX_TARGET"
+fi
+
 # 3. Storage: /kaggle/working is kept only if you "Save Version" the notebook,
 #    so use "Save to cloud" in the player for songs you want to keep.
 OUT_DIR="/kaggle/working/lyra-songs"
