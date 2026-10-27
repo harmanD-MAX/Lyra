@@ -62,7 +62,7 @@ for k in ('CF_API_TOKEN', 'LYRA_SESSION_SECRET'):
 !bash /kaggle/working/Lyra/start-kaggle.sh
 ```
 
-The studio opens at the `https://….trycloudflare.com` address it prints (a new one each session). Kaggle keeps `/kaggle/working` only when you save a notebook version, so use **Save to cloud** for songs you want to keep.
+The studio opens at `https://lyra-studio.loca.lt`, the same fixed address as on Colab (if an old session still holds it, wait a few minutes and run the cell again). For a steadier tunnel with a new address each session, run `!LYRA_TUNNEL=cloudflare bash /kaggle/working/Lyra/start-kaggle.sh` instead. Kaggle keeps `/kaggle/working` only when you save a notebook version, so use **Save to cloud** for songs you want to keep.
 
 The backend creates the tables on startup; the same schema is in `cloudflare/schema.sql`. Songs saved before sign-in was turned on have no owner, so they don't show in anyone's My Songs.
 
