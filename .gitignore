@@ -43,3 +43,4 @@ backend/jobs_db.json
 
 # External engines (cloned by tools/setup_seedvc.sh)
 backend/third_party/
+.bin/

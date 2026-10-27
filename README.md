@@ -49,6 +49,21 @@ os.environ['LYRA_SESSION_SECRET'] = userdata.get('LYRA_SESSION_SECRET')
 !bash start-colab.sh
 ```
 
+On Kaggle (free GPU, about 30 hours a week), create a notebook, set **Accelerator → GPU T4 x2** and **Internet → On** in the sidebar, add your secrets under **Add-ons → Secrets**, then run:
+
+```python
+import os
+from kaggle_secrets import UserSecretsClient
+s = UserSecretsClient()
+for k in ('CF_API_TOKEN', 'LYRA_SESSION_SECRET'):
+    try: os.environ[k] = s.get_secret(k)
+    except Exception: pass
+!git clone -b vocal-improvement https://github.com/harmanD-MAX/Lyra.git /kaggle/working/Lyra
+!bash /kaggle/working/Lyra/start-kaggle.sh
+```
+
+The studio opens at the `https://….trycloudflare.com` address it prints (a new one each session). Kaggle keeps `/kaggle/working` only when you save a notebook version, so use **Save to cloud** for songs you want to keep.
+
 The backend creates the tables on startup; the same schema is in `cloudflare/schema.sql`. Songs saved before sign-in was turned on have no owner, so they don't show in anyone's My Songs.
 
 ## Voice engines
