@@ -136,17 +136,40 @@ export default function App() {
   useEffect(() => {
     if (!activeJobId) return;
 
+    // Tunnels (loca.lt, trycloudflare) drop for a few seconds now and then and answer 404/5xx
+    // while they reconnect. The job keeps running on the server, so keep polling through
+    // those gaps; give up only when Lyra itself says the job is gone or the server stays
+    // unreachable for several minutes.
+    let failingSince = 0;
+    const stopWithError = (message) => {
+      clearInterval(pollIntervalRef.current);
+      setIsSubmitting(false);
+      setErrorMsg(message);
+      setActiveJobId(null);
+      fetchRecentJobs();
+    };
+
     const checkStatus = () => {
       fetch(`/api/status/${activeJobId}`)
-        .then(res => {
+        .then(async res => {
           if (!res.ok) {
-            throw new Error(res.status === 404 ? 'Job session expired' : `Server status ${res.status}`);
+            const body = await res.json().catch(() => null);
+            if (res.status === 404 && body?.detail === 'Job not found') {
+              const err = new Error('This job is no longer on the server. If it had finished, it is in My Songs.');
+              err.fatal = true;
+              throw err;
+            }
+            throw new Error(`Server status ${res.status}`);
           }
           return res.json();
         })
         .then(job => {
           if (!job || !job.status) {
             throw new Error('Invalid status response from server');
+          }
+          if (failingSince) {
+            failingSince = 0;
+            setErrorMsg('');
           }
           setCurrentJob(job);
           if (job.status === 'completed' || job.status === 'error') {
@@ -161,10 +184,17 @@ export default function App() {
           }
         })
         .catch(err => {
-          console.error("Status polling failed:", err);
-          clearInterval(pollIntervalRef.current);
-          setIsSubmitting(false);
-          setErrorMsg(err.message || 'Lost connection to backend server.');
+          console.warn("Status polling failed:", err);
+          if (err.fatal) {
+            stopWithError(err.message);
+            return;
+          }
+          if (!failingSince) failingSince = Date.now();
+          if (Date.now() - failingSince > 5 * 60 * 1000) {
+            stopWithError('Lost connection to the server. Your song may still finish: check My Songs in a few minutes.');
+          } else {
+            setErrorMsg('Connection to the server dropped. Reconnecting… your song is still rendering.');
+          }
         });
     };
 
