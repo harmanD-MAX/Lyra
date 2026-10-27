@@ -19,6 +19,12 @@ if ! command -v lt &> /dev/null; then
   npm install -g localtunnel > /dev/null 2>&1 || true
 fi
 
+# localtunnel corrupts uploaded audio when it rewrites the Host header; swap in the byte-safe version
+LT_FIX_TARGET="$(npm root -g 2>/dev/null || true)/localtunnel/lib/HeaderHostTransformer.js"
+if [ -f "$LT_FIX_TARGET" ]; then
+  cp "$ROOT_DIR/tools/localtunnel-host-fix.js" "$LT_FIX_TARGET"
+fi
+
 # 3. Retrieve gateway password (server external IP)
 TUNNEL_PASS=$(curl -s https://loca.lt/mytunnelpassword 2>/dev/null || curl -s https://ipv4.icanhazip.com 2>/dev/null || echo "Check Colab IP")
 
