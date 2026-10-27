@@ -267,9 +267,16 @@ export default function App() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const detail = typeof errorData.detail === 'string' ? errorData.detail : '';
-        throw new Error(detail || `Failed to start conversion (server replied ${response.status}${response.status >= 502 ? ': the backend or tunnel did not respond in time' : ''})`);
+        const body = await response.text().catch(() => '');
+        let detail = '';
+        try {
+          const d = JSON.parse(body).detail;
+          detail = typeof d === 'string' ? d : (d ? JSON.stringify(d) : '');
+        } catch {
+          // Not JSON: the tunnel or a proxy answered, not Lyra. Show what it said.
+          detail = body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+        }
+        throw new Error(`Failed to start conversion (server replied ${response.status})${detail ? `: ${detail}` : ''}`);
       }
 
       const data = await response.json();
