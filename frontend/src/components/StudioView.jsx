@@ -135,25 +135,6 @@ function PreviewPlayer({ playing, onToggle, time, duration, onSeek, formatTime }
 }
 
 /** Fixed Notes vs Raw switch shown once a take is loaded. */
-function PitchCompare({ mode, onSelect, tuning, hasTuned, rawLabel, RawIcon }) {
-  return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-      <div className="seg">
-        <button type="button" className="seg-item" data-active={mode === 'tuned'} data-tone="gold" onClick={() => onSelect('tuned')} disabled={tuning && !hasTuned}>
-          {tuning && !hasTuned ? <Loader2 className="animate-spin" /> : <Sparkles />} Fixed notes
-        </button>
-        <button type="button" className="seg-item" data-active={mode === 'raw'} onClick={() => onSelect('raw')}>
-          <RawIcon /> {rawLabel}
-        </button>
-      </div>
-      <span className="text-[11px] text-white/45 font-mono flex items-center gap-1.5">
-        {tuning ? <span className="eq-loader text-[#e5a958] !h-3"><span /><span /><span /></span> : <span className="w-1.5 h-1.5 rounded-full bg-[#e5a958]" />}
-        {tuning ? 'Tuning your take…' : mode === 'tuned' ? 'Notes snapped to the scale' : 'Untouched original'}
-      </span>
-    </div>
-  );
-}
-
 /** Upload illustration for the empty drop zone. */
 function DropArt({ active }) {
   return (
@@ -283,11 +264,7 @@ export default function StudioView({
 
   // Mic recording pitch correction & preview states
   const [rawAudioFile, setRawAudioFile] = useState(null);
-  const [tunedAudioFile, setTunedAudioFile] = useState(null);
   const [rawAudioUrl, setRawAudioUrl] = useState('');
-  const [tunedAudioUrl, setTunedAudioUrl] = useState('');
-  const [vocalPitchMode, setVocalPitchMode] = useState('tuned'); // 'tuned' | 'raw'
-  const [isTuningVocal, setIsTuningVocal] = useState(false);
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const [previewTime, setPreviewTime] = useState(0);
   const [previewDuration, setPreviewDuration] = useState(0);
@@ -470,11 +447,8 @@ export default function StudioView({
     }
     setAudioFile(null);
     setRawAudioFile(null);
-    setTunedAudioFile(null);
     if (rawAudioUrl) URL.revokeObjectURL(rawAudioUrl);
-    if (tunedAudioUrl) URL.revokeObjectURL(tunedAudioUrl);
     setRawAudioUrl('');
-    setTunedAudioUrl('');
     setPreviewPlaying(false);
     setPreviewTime(0);
     setPreviewDuration(0);
@@ -826,11 +800,8 @@ export default function StudioView({
       }
 
       if (rawAudioUrl) URL.revokeObjectURL(rawAudioUrl);
-      if (tunedAudioUrl) URL.revokeObjectURL(tunedAudioUrl);
       setRawAudioFile(null);
-      setTunedAudioFile(null);
       setRawAudioUrl('');
-      setTunedAudioUrl('');
       setPreviewPlaying(false);
       setPreviewTime(0);
       setPreviewDuration(0);
@@ -850,7 +821,6 @@ export default function StudioView({
         setRawAudioFile(rawFile);
         setRawAudioUrl(rawUrl);
         setAudioFile(rawFile);
-        setVocalPitchMode('tuned');
         setMode('record');
         setIsRecording(false);
         stream.getTracks().forEach(t => t.stop());
@@ -858,27 +828,6 @@ export default function StudioView({
         recCtxRef.current?.close().catch(() => { });
         recCtxRef.current = null;
 
-        // Immediately auto-generate maximum pitch-corrected track
-        setIsTuningVocal(true);
-        try {
-          const fd = new FormData();
-          fd.append('audio_file', rawFile);
-          const res = await fetch('/api/tune_preview', { method: 'POST', body: fd });
-          if (res.ok) {
-            const tunedBlob = await res.blob();
-            const tunedFile = new File([tunedBlob], `vocal_recording_tuned_${Date.now()}.wav`, { type: 'audio/wav' });
-            const tunedUrl = URL.createObjectURL(tunedBlob);
-            setTunedAudioFile(tunedFile);
-            setTunedAudioUrl(tunedUrl);
-            // Default to the tuned file for the best fixed notes into RVC!
-            setAudioFile(tunedFile);
-            setVocalPitchMode('tuned');
-          }
-        } catch (err) {
-          console.warn("Auto-tune preview error:", err);
-        } finally {
-          setIsTuningVocal(false);
-        }
       };
 
       mr.start(100);
@@ -909,32 +858,6 @@ export default function StudioView({
     setRawAudioFile(file);
     setRawAudioUrl(url);
     setAudioFile(file);
-    setTunedAudioFile(null);
-    setTunedAudioUrl(null);
-    setVocalPitchMode('tuned');
-
-    // Immediately trigger studio pitch correction for uploaded audio track
-    setIsTuningVocal(true);
-    try {
-      const fd = new FormData();
-      fd.append('audio_file', file);
-      const res = await fetch('/api/tune_preview', { method: 'POST', body: fd });
-      if (res.ok) {
-        const tunedBlob = await res.blob();
-        const baseName = (file.name || 'uploaded_audio').replace(/\.[^/.]+$/, "");
-        const tunedFile = new File([tunedBlob], `${baseName}_tuned.wav`, { type: 'audio/wav' });
-        const tunedUrl = URL.createObjectURL(tunedBlob);
-        setTunedAudioFile(tunedFile);
-        setTunedAudioUrl(tunedUrl);
-        // Default to tuned file for the best fixed notes into RVC!
-        setAudioFile(tunedFile);
-        setVocalPitchMode('tuned');
-      }
-    } catch (err) {
-      console.warn("Auto-tune preview error on upload:", err);
-    } finally {
-      setIsTuningVocal(false);
-    }
   };
 
   const togglePreviewPlay = () => {
@@ -949,30 +872,6 @@ export default function StudioView({
     }
   };
 
-  const handleSelectPitchMode = (targetMode) => {
-    setVocalPitchMode(targetMode);
-    const audio = previewAudioRef.current;
-    const prevPos = audio ? audio.currentTime : previewTime;
-    const wasPlay = previewPlaying;
-
-    if (targetMode === 'tuned') {
-      if (tunedAudioFile) setAudioFile(tunedAudioFile);
-      if (audio && (tunedAudioUrl || rawAudioUrl)) {
-        audio.src = tunedAudioUrl || rawAudioUrl;
-        audio.load();
-        audio.currentTime = prevPos;
-        if (wasPlay) audio.play().catch(() => { });
-      }
-    } else {
-      if (rawAudioFile) setAudioFile(rawAudioFile);
-      if (audio && rawAudioUrl) {
-        audio.src = rawAudioUrl;
-        audio.load();
-        audio.currentTime = prevPos;
-        if (wasPlay) audio.play().catch(() => { });
-      }
-    }
-  };
 
   // New renders come back autotuned; older songs start with autotune off
   useEffect(() => {
@@ -1978,9 +1877,24 @@ export default function StudioView({
                       {/* Shared preview audio element for recording or uploaded audio */}
                       <audio
                         ref={previewAudioRef}
-                        src={vocalPitchMode === 'tuned' ? (tunedAudioUrl || rawAudioUrl) : rawAudioUrl}
+                        src={rawAudioUrl}
                         onTimeUpdate={(e) => setPreviewTime(e.target.currentTime)}
-                        onLoadedMetadata={(e) => setPreviewDuration(e.target.duration)}
+                        onLoadedMetadata={(e) => {
+                          const el = e.target;
+                          if (Number.isFinite(el.duration)) {
+                            setPreviewDuration(el.duration);
+                            return;
+                          }
+                          // Recorded WebM has no duration header: seek past the end once so the browser measures it
+                          const onDuration = () => {
+                            if (!Number.isFinite(el.duration)) return;
+                            el.removeEventListener('durationchange', onDuration);
+                            setPreviewDuration(el.duration);
+                            el.currentTime = 0;
+                          };
+                          el.addEventListener('durationchange', onDuration);
+                          el.currentTime = 1e101;
+                        }}
                         onEnded={() => setPreviewPlaying(false)}
                         onPause={() => setPreviewPlaying(false)}
                         onPlay={() => setPreviewPlaying(true)}
@@ -2021,9 +1935,7 @@ export default function StudioView({
                                       setPreviewPlaying(false);
                                       setAudioFile(null);
                                       setRawAudioFile(null);
-                                      setTunedAudioFile(null);
                                       setRawAudioUrl(null);
-                                      setTunedAudioUrl(null);
                                       fileInputRef.current?.click();
                                     }}
                                     className="btn btn-secondary btn-sm"
@@ -2031,7 +1943,7 @@ export default function StudioView({
                                     Change
                                   </button>
                                 </div>
-                                <PitchCompare mode={vocalPitchMode} onSelect={handleSelectPitchMode} tuning={isTuningVocal} hasTuned={Boolean(tunedAudioFile)} rawLabel="Raw" RawIcon={Upload} />
+                                <p className="text-[11px] text-white/45 font-mono flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#e5a958]" /> Autotune is applied when you convert</p>
                                 <PreviewPlayer
                                   playing={previewPlaying}
                                   onToggle={togglePreviewPlay}
@@ -2146,10 +2058,8 @@ export default function StudioView({
                                 <p className="text-xs text-white/45 mt-0.5">
                                   {isRecording
                                     ? 'Sing clearly — stop when you are done.'
-                                    : isTuningVocal
-                                      ? 'Tuning your take…'
-                                      : isRecordedTake
-                                        ? (vocalPitchMode === 'tuned' ? 'Notes snapped to the scale.' : 'Untouched microphone take.')
+                                    : isRecordedTake
+                                        ? 'Your take, untouched. Autotune is applied when you convert.'
                                         : 'Headphones help keep the backing track out of your take.'}
                                 </p>
                               </div>
@@ -2172,7 +2082,6 @@ export default function StudioView({
 
                             {!isRecording && isRecordedTake && (
                               <div className="space-y-3 animate-fadeIn">
-                                <PitchCompare mode={vocalPitchMode} onSelect={handleSelectPitchMode} tuning={isTuningVocal} hasTuned={Boolean(tunedAudioFile)} rawLabel="Raw voice" RawIcon={Mic} />
                                 <PreviewPlayer
                                   playing={previewPlaying}
                                   onToggle={togglePreviewPlay}
@@ -2273,13 +2182,11 @@ export default function StudioView({
                   <button
                     type="button"
                     onClick={handleConvertTrigger}
-                    disabled={isSubmitting || isTuningVocal || !hasValidInput}
+                    disabled={isSubmitting || !hasValidInput}
                     className={`btn btn-lg w-full flex-shrink-0 ${isSubmitting || !hasValidInput ? 'btn-secondary' : 'btn-primary shine-btn'}`}
                   >
                     {isSubmitting ? (
                       <><span className="eq-loader"><span /><span /><span /><span /></span> Converting…</>
-                    ) : isTuningVocal ? (
-                      <><Loader2 className="animate-spin" /> Tuning your take…</>
                     ) : (
                       <>
                         <Sparkles /> Convert song
