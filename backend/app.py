@@ -1,5 +1,5 @@
 import os
-# Prevent virtual memory fragmentation and disable CUDA Graphs for full-track audio
+# memory settings
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 os.environ.setdefault("RVC_CUDA_GRAPH", "0")
 
@@ -407,9 +407,7 @@ class JobCancelledError(BaseException):
     """Raised to immediately abort a running job thread when cancelled by the user."""
     pass
 
-# Guard against VRAM/RAM exhaustion on Colab (15GB VRAM / 12.7GB RAM): 
-# Limit active GPU syntheses to 1 on constrained environments to prevent fatal 502 OOM crashes,
-# while allowing multi-job queueing so next songs start instantly when prior songs finish or cancel.
+# run one synthesis at a time on small gpus to avoid oom
 MAX_CONCURRENT_WORKERS = int(os.environ.get("LYRA_MAX_WORKERS", "1" if (resources.LITE or resources.ram_gb() <= 16.5) else "3"))
 JOB_EXECUTOR = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_WORKERS, thread_name_prefix="lyra-job",
                                   initializer=resources.apply_worker_limits)
@@ -467,8 +465,7 @@ def run_pipeline(job_id: str, params: "studio_pipeline.JobParams"):
         }
         results["settings"]["singer_name"] = target_name
 
-        # Fresh studio render: keep all stems local and unsaved so the user can audition them in Studio.
-        # Master 3D will be saved to Cloudflare R2 on user request or when the user creates a new song / leaves.
+        # keep stems local for studio playback
         results["saved_to_cloud"] = False
         results["cloud_master_3d_url"] = ""
 
@@ -515,7 +512,7 @@ def run_pipeline(job_id: str, params: "studio_pipeline.JobParams"):
         print(f"Error in job {job_id}: {traceback.format_exc()}")
         job_manager.update_job(job_id, status="error", error=str(e))
     finally:
-        # Crucial for machines with small RAM (e.g. 8 GB): purge model weights and MPS buffers between songs
+        # free model weights between songs on small machines
         if resources.LITE or (0 < resources.ram_gb() <= 10.0):
             audio_processor.unload_vc_cache()
             audio_processor.clear_memory()
@@ -668,10 +665,7 @@ async def rerender_section(
     })
 
 
-# ---------------------------------------------------------------------------
-# Personal voices ("Keep my voice")
-# ---------------------------------------------------------------------------
-
+# personal voices
 @app.get("/api/voices")
 async def list_voices():
     return JSONResponse(content={"voices": voices.list_custom_voices()})
@@ -808,10 +802,7 @@ async def engine_status():
     })
 
 
-# ---------------------------------------------------------------------------
-# Composer exports: stems, MIDI, analysis
-# ---------------------------------------------------------------------------
-
+# composer exports
 @app.get("/api/stems/{job_id}/all.zip")
 async def download_all_stems(job_id: str):
     job_dir = os.path.join(OUTPUTS_DIR, job_id)

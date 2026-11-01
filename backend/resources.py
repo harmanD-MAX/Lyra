@@ -1,15 +1,4 @@
-"""
-Resource profile: keep Lyra friendly to small machines.
-
-    LYRA_PROFILE=lite       small models (~0.6 GB instead of ~2.7 GB), half the
-                            CPU cores, low process priority, WAV masters and
-                            intermediates removed after each song
-    LYRA_PROFILE=standard   full-size models, most CPU cores
-    (unset)                 auto: lite when free disk < 25 GB or RAM <= 16 GB
-
-Also guards the disk: a model download that would leave less than
-`MIN_FREE_GB` free is skipped instead of filling the drive.
-"""
+"""Resource limits and memory guards for small machines."""
 
 import logging
 import os
@@ -20,14 +9,13 @@ logger = logging.getLogger(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MIN_FREE_GB = float(os.environ.get("LYRA_MIN_FREE_GB", "3"))
 
-# Guard Apple Silicon unified memory against swap explosion:
-# Disables MPS over-allocation and enables immediate buffer reclamation back to macOS
+# prevent mac mps memory explosion
 if "PYTORCH_MPS_HIGH_WATERMARK_RATIO" not in os.environ:
     os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
 
 try:
     import mlx.core as mx
-    # Release inactive Metal buffers back to macOS immediately
+    # free inactive metal buffers
     if hasattr(mx, "set_cache_limit"):
         mx.set_cache_limit(0)
     elif hasattr(mx.metal, "set_cache_limit"):
@@ -80,15 +68,14 @@ SEPARATION_MODELS = {
 
 def cpu_threads() -> int:
     cores = os.cpu_count() or 4
-    # On <=8GB RAM Macs, limit PyTorch to 2 threads to prevent 100% CPU saturation
-    # and thermal throttling, keeping performance cores free for the browser & IDE.
+    # limit threads on small macs to stay responsive
     if ram_gb() <= 9.0:
         return max(1, min(2, cores // 2))
     return max(1, cores // 2) if LITE else max(1, cores - 1)
 
 
 def apply_worker_limits():
-    """Call at the start of each heavy job thread/process."""
+    """Set thread limits for heavy jobs."""
     try:
         import torch
         torch.set_num_threads(cpu_threads())
@@ -96,7 +83,7 @@ def apply_worker_limits():
         pass
     if LITE:
         try:
-            os.nice(15)  # give browser and IDE high priority
+            os.nice(15)  # lower process priority
         except Exception:
             pass
 
@@ -111,11 +98,7 @@ def has_room_for(size_bytes: int, what: str = "model") -> bool:
     return True
 
 
-# Lean retention: keep only the essential finished outputs
-# 1. master_remastered.mp3 (the finished mastered song)
-# 2. converted_vocals.wav / vocal_processed.wav (the AI lead vocals)
-# 3. accompaniment.wav / instrumental.wav (the backing track)
-# 4. meta.json & pipeline_state.json (track title, artist, art)
+# essential stems and files to keep after processing
 _KEEP = {
     "meta.json", "pipeline_state.json",
     "master_remastered.mp3", "master_remastered.wav",

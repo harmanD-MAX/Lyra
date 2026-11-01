@@ -76,9 +76,7 @@ def detect_cuda_graph_support(device):
 def configure_cuda_graph(device):
     global _probe_result
     explicit = os.environ.get(ENV_NAME)
-    # CUDA Graphs should only be enabled if explicitly requested (RVC_CUDA_GRAPH=1).
-    # For full audio tracks (3-6+ minute songs), eager execution uses ~1.2 GB VRAM,
-    # whereas CUDA Graph capture pre-allocates 11+ GB in private pools, triggering CUDA OOM on 15 GB GPUs.
+    # only enable if explicitly set to avoid high vram use on full songs
     if explicit != "1":
         os.environ[ENV_NAME] = "0"
         return False

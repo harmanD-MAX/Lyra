@@ -433,8 +433,7 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
             engine_reason = f"fell back from {engine}"
         f0, fps, engine = r["f0"], r["fps"], r["engine"]
 
-    # 6b. Autotune the converted output (the engine can drift off the melody or crack).
-    # The untuned lead is kept so the player's Autotune button can switch it off.
+    # autotune the converted vocal output
     autotuned = False
     if not is_raw and p.autotune:
         shutil.copy2(lead_out, os.path.join(job_dir, UNTUNED_LEAD))
@@ -446,8 +445,7 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
             os.remove(os.path.join(job_dir, UNTUNED_LEAD))
     analysis["autotune"] = autotuned
 
-    # IMMEDIATELY UNLOAD NEURAL MODELS FROM RAM / VRAM AT 85%
-    # HuBERT, RMVPE, and RVC Synthesizer weights (~2.5GB) are purged before mastering starts
+    # unload models before mastering to free memory
     try:
         audio_processor.unload_vc_cache()
     except Exception as e_unl:

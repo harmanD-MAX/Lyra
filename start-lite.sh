@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Run Lyra on a small machine (e.g. a Mac with little free disk / RAM):
-#   - small separation models (~0.6 GB), half the CPU cores, low priority
-#   - one process: the backend also serves the built frontend
-#   - open http://127.0.0.1:8000
+# run lyra in lite mode for smaller machines
 set -euo pipefail
 cd "$(dirname "$0")"
 

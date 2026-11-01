@@ -7,7 +7,7 @@ from multiprocessing import cpu_count
 from pathlib import Path
 from tools.file_io import read_text
 
-# Prevent virtual memory fragmentation and default to eager mode for full-track audio
+# memory settings for full songs
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 os.environ.setdefault("RVC_CUDA_GRAPH", "0")
 
@@ -19,9 +19,7 @@ from tools.cuda_graph import configure_cuda_graph
 logger = logging.getLogger(__name__)
 
 
-# Keep device/precision eligibility in one place.  This follows the GPU rules
-# used by GPT-SoVITS: GPUs below 4 GiB or SM 5.3 are not selected, Pascal
-# SM 6.1 and GTX 16-series cards use fp32, and newer CUDA GPUs use fp16.
+# device and precision selection
 def get_device_dtype_sm(idx) :
     cpu = torch.device("cpu")
     if not torch.cuda.is_available() or idx < 0 or idx >= torch.cuda.device_count():
@@ -116,7 +114,7 @@ else:
         0.0,
     )
 
-# Do not expose an unsupported CUDA device as the inference default.
+# fallback if cuda is unavailable
 if infer_device.type != "cuda":
     if DML_AVAILABLE:
         infer_device, infer_dtype, infer_gpu_mem = (
@@ -132,9 +130,7 @@ if infer_device.type != "cuda":
         )
 
 
-# Run a real capture/replay probe on the selected inference device.  Both
-# application entry points import this module, so downstream inference code
-# receives one consistent 0/1 switch without duplicating device checks.
+# check cuda graph capability
 CUDA_GRAPH_AVAILABLE = configure_cuda_graph(infer_device)
 
 
