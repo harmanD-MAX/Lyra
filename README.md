@@ -41,3 +41,13 @@ In a notebook with GPU T4 enabled:
 - **Pitch Correction**: Natural autotune and timing correction.
 - **Stem Separation**: Automatically split vocals, instrumental, and backing tracks.
 - **Cloud & Local Storage**: Save songs locally, to Google Drive, or sync with Cloudflare R2.
+
+## Architecture
+
+![System overview](docs/architecture/system-overview.png)
+
+![Backend modules](docs/architecture/backend-modules.png)
+
+![Render pipeline](docs/architecture/render-pipeline.png)
+
+![Frontend](docs/architecture/frontend.png)
