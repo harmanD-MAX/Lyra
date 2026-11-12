@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 from typing import Optional, Dict, Any, Union, List
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -126,6 +127,81 @@ def unload_demucs_model():
         logger.info("Demucs model unloaded and GPU/MPS cache cleared.")
 
 
+def _score_audio_candidate(
+    cand_title: str,
+    cand_uploader: str,
+    cand_duration: float,
+    target_title: str,
+    target_artist: str,
+    target_duration: float
+) -> float:
+    """
+    Scores an audio stream candidate against target metadata.
+    Rejects slowed/reverb edits, fan covers, instrumental/karaoke, and duration mismatches.
+    """
+    t_clean = (target_title or "").lower().strip()
+    a_clean = (target_artist or "").lower().strip()
+    cand_text = f"{cand_title or ''} {cand_uploader or ''}".lower()
+
+    # Penalize unwanted edits, covers, slowed/reverb, ringtones
+    penalties = [
+        "slowed", "reverb", "sped up", "speed up", "nightcore", "lofi", "lo-fi",
+        "8d", "8-d", "remix", "cover", "status", "whatsapp", "ringtone", "teaser",
+        "trailer", "reaction", "mashup", "karaoke", "instrumental", "clean vocal",
+        "acapella", "isolated vocals", "bass boosted", "slow reverb", "slow+reverb",
+        "pitched", "edit audio", "slow version", "reverb version"
+    ]
+    for p in penalties:
+        if p in cand_text and p not in t_clean:
+            return -999.0
+
+    score = 0.0
+
+    # Duration matching (huge signal for studio track vs teaser/podcast/slowed)
+    if target_duration > 0 and cand_duration > 0:
+        diff = abs(cand_duration - target_duration)
+        if cand_duration < 45 and target_duration > 70:
+            return -999.0
+        if diff <= 4:
+            score += 50.0
+        elif diff <= 10:
+            score += 35.0
+        elif diff <= 20:
+            score += 20.0
+        elif diff <= 35:
+            score += 5.0
+        elif diff > 60:
+            score -= 60.0
+        if diff > 100:
+            return -999.0
+
+    # Target title word match
+    t_words = [w for w in re.split(r'\W+', t_clean) if len(w) > 2]
+    matched_words = [w for w in t_words if w in cand_text]
+    if t_words:
+        ratio = len(matched_words) / len(t_words)
+        score += ratio * 40.0
+        if ratio < 0.5:
+            score -= 30.0
+
+    # Exact title phrase match
+    if t_clean and t_clean in cand_text:
+        score += 25.0
+
+    # Artist word match
+    a_words = [w for w in re.split(r'\W+', a_clean) if len(w) > 2]
+    matched_a = [w for w in a_words if w in cand_text]
+    if a_words:
+        score += (len(matched_a) / len(a_words)) * 30.0
+
+    # Official track indicators
+    for boost in ["official audio", "original audio", "full song", "official music video", "official video", "original motion picture"]:
+        if boost in cand_text:
+            score += 15.0
+
+    return score
+
+
 def resolve_spotify_track_info(url: str) -> dict:
     """
     Resolves track metadata (Title, Artist, Album Artwork, Duration) from any Spotify URL or URI
@@ -149,6 +225,7 @@ def resolve_spotify_track_info(url: str) -> dict:
         track_id = url.split(":")[-1]
         url = f"https://open.spotify.com/track/{track_id}"
 
+    # Extract track_id if present (even if within album?highlight=spotify:track:...)
     track_match = re.search(r"track[/:]([a-zA-Z0-9]+)", url)
     album_match = re.search(r"album[/:]([a-zA-Z0-9]+)", url)
     playlist_match = re.search(r"playlist[/:]([a-zA-Z0-9]+)", url)
@@ -161,8 +238,34 @@ def resolve_spotify_track_info(url: str) -> dict:
     thumbnail = ""
     duration = 0
 
-    # Layer 0: If album or playlist, extract the first track from embed state
-    if album_match or playlist_match:
+    # Layer 1: If track_id is identified, fetch track embed state directly
+    if track_id:
+        try:
+            embed_url = f"https://open.spotify.com/embed/track/{track_id}"
+            req = urllib.request.Request(embed_url, headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            })
+            with urllib.request.urlopen(req, context=ctx, timeout=8) as r:
+                html_embed = r.read().decode("utf-8", errors="ignore")
+            m = re.search(r'<script id="(?:__NEXT_DATA__|initial-state)"[^>]*>(.*?)</script>', html_embed)
+            if m:
+                data = json.loads(m.group(1))
+                entity = data.get("props", {}).get("pageProps", {}).get("state", {}).get("data", {}).get("entity", {})
+                if entity:
+                    title = (entity.get("title") or entity.get("name") or "").strip()
+                    artists_list = [a.get("name") for a in entity.get("artists", []) if a.get("name")]
+                    if artists_list:
+                        artist = ", ".join(artists_list)
+                    if entity.get("duration"):
+                        duration = int(entity.get("duration") / 1000)
+                    images = entity.get("visualIdentity", {}).get("image", [])
+                    if images and isinstance(images, list):
+                        thumbnail = images[-1].get("url", "")
+        except Exception as e:
+            logger.warning(f"Spotify track embed extraction error: {e}")
+
+    # Layer 2: If no track_id, try album or playlist embed to extract specific track
+    if not title and (album_match or playlist_match):
         embed_type = "album" if album_match else "playlist"
         item_id = album_match.group(1) if album_match else playlist_match.group(1)
         try:
@@ -178,24 +281,25 @@ def resolve_spotify_track_info(url: str) -> dict:
                 entity = data.get("props", {}).get("pageProps", {}).get("state", {}).get("data", {}).get("entity", {})
                 tracks = entity.get("trackList", [])
                 if tracks:
-                    t0 = tracks[0]
-                    title = t0.get("title", "").strip()
-                    artist = t0.get("subtitle", "").strip()
-                    duration = int(t0.get("duration", 0) / 1000)
-                    t_uri = t0.get("uri", "")
+                    selected = tracks[0]
+                    if track_id:
+                        for tr in tracks:
+                            if tr.get("uri", "").endswith(track_id):
+                                selected = tr
+                                break
+                    title = selected.get("title", "").strip()
+                    artist = selected.get("subtitle", "").strip()
+                    duration = int(selected.get("duration", 0) / 1000)
+                    t_uri = selected.get("uri", "")
                     if t_uri.startswith("spotify:track:"):
                         track_id = t_uri.split(":")[-1]
                 images = entity.get("visualIdentity", {}).get("image", [])
                 if images and isinstance(images, list):
                     thumbnail = images[-1].get("url", "")
-            if not thumbnail:
-                og_image = re.search(r'<meta property="og:image" content="([^"]+)"', html_embed)
-                if og_image:
-                    thumbnail = og_image.group(1).strip()
         except Exception as e:
             logger.warning(f"Spotify {embed_type} embed extraction error: {e}")
 
-    # Layer 1: Fetch Open Graph meta tags for tracks
+    # Layer 3: Open Graph meta tags fallback
     if not title:
         try:
             req = urllib.request.Request(clean_url, headers={
@@ -221,7 +325,7 @@ def resolve_spotify_track_info(url: str) -> dict:
         except Exception as e:
             logger.warning(f"Spotify OG tags error for {url}: {e}")
 
-    # Layer 2: oEmbed fallback
+    # Layer 4: oEmbed fallback
     if not title or not thumbnail:
         try:
             oembed_url = f"https://open.spotify.com/oembed?url={urllib.parse.quote(clean_url)}"
@@ -235,34 +339,17 @@ def resolve_spotify_track_info(url: str) -> dict:
         except Exception as e:
             logger.warning(f"Spotify oEmbed fallback error: {e}")
 
-    # Layer 3: Embed page __NEXT_DATA__ for precise duration and artists list
-    if track_id and (not artist or duration == 0):
-        try:
-            embed_url = f"https://open.spotify.com/embed/track/{track_id}"
-            req = urllib.request.Request(embed_url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, context=ctx, timeout=8) as r:
-                html_embed = r.read().decode("utf-8", errors="ignore")
-            m = re.search(r'<script id="(?:__NEXT_DATA__|initial-state)"[^>]*>(.*?)</script>', html_embed)
-            if m:
-                data = json.loads(m.group(1))
-                entity = data.get("props", {}).get("pageProps", {}).get("state", {}).get("data", {}).get("entity", {})
-                if entity:
-                    if not title and (entity.get("title") or entity.get("name")):
-                        title = (entity.get("title") or entity.get("name")).strip()
-                    artists_list = [a.get("name") for a in entity.get("artists", []) if a.get("name")]
-                    if artists_list and not artist:
-                        artist = ", ".join(artists_list)
-                    if entity.get("duration"):
-                        duration = int(entity.get("duration") / 1000)
-        except Exception as e:
-            logger.warning(f"Spotify Embed extraction error: {e}")
+    if not title or title.lower() in ["spotify track", "spotify", "open spotify", "spotify embed"]:
+        raise RuntimeError(
+            f"Could not identify song from Spotify link: '{url}'. "
+            "Please check the link or provide a direct song link."
+        )
 
-    final_title = title or "Spotify Track"
     primary_artist = artist.split(",")[0].strip() if artist else ""
-    query = f"{primary_artist} - {final_title} audio" if primary_artist else f"{final_title} audio"
+    query = f"{primary_artist} - {title} audio" if primary_artist else f"{title} audio"
 
     return {
-        "title": final_title,
+        "title": title,
         "artist": artist,
         "thumbnail": thumbnail,
         "duration": duration,
@@ -325,13 +412,14 @@ def download_spotify_audio(url: str, output_dir: str, progress_cb=None) -> dict:
     Downloads high-fidelity audio from a Spotify Track URL by resolving
     metadata and retrieving highest-quality 44.1kHz stereo WAV.
     Auto-falls back to SoundCloud if YouTube blocks datacenter/cloud IPs.
-    Returns metadata dict {audio_path, title, duration, thumbnail, uploader}.
+    Validates candidates using duration matching and title scoring to prevent
+    downloading slowed/reverb edits, remixes, or mismatched tracks.
     """
     if progress_cb:
         progress_cb(8, "Resolving Spotify track metadata & album art...")
 
     meta = resolve_spotify_track_info(url)
-    title = meta.get("title", "Spotify Track")
+    title = meta["title"]
     artist = meta.get("artist", "")
     thumbnail = meta.get("thumbnail", "")
     duration = meta.get("duration", 0)
@@ -342,89 +430,85 @@ def download_spotify_audio(url: str, output_dir: str, progress_cb=None) -> dict:
         progress_cb(12, f"Matched '{display_title[:38]}'...")
 
     primary_artist = artist.split(",")[0].strip() if artist else ""
-    queries = [
-        f"{primary_artist} {title} audio".strip(),
-        f"{artist} {title} audio".strip(),
-        f"{title} audio".strip(),
+    search_queries = [
+        f"{primary_artist} {title}".strip(),
+        f"{artist} {title}".strip(),
+        f"{title}".strip(),
     ]
-    queries = list(dict.fromkeys([q for q in queries if q]))
+    search_queries = list(dict.fromkeys([q for q in search_queries if q]))
 
     os.makedirs(output_dir, exist_ok=True)
     out_template = os.path.join(output_dir, "input_audio.%(ext)s")
     dl_opts = _get_yt_dlp_opts(out_template)
 
     if progress_cb:
-        progress_cb(18, "Downloading audio stream with candidate fallback...")
+        progress_cb(18, "Searching highest-fidelity audio streams...")
 
-    # Step 1: Search for top candidates on YouTube
-    candidate_ids = []
+    candidates = []
+
+    # 1. Gather YouTube candidates
     search_opts = {**_get_yt_dlp_opts(), 'extract_flat': True}
     with yt_dlp.YoutubeDL(search_opts) as ydl:
-        for q in queries:
+        for q in search_queries[:2]:
             try:
-                res = ydl.extract_info(f"ytsearch5:{q}", download=False)
+                res = ydl.extract_info(f"ytsearch8:{q}", download=False)
                 if res and "entries" in res:
                     for entry in res["entries"]:
-                        if entry and entry.get("id") and entry["id"] not in candidate_ids:
-                            candidate_ids.append(entry["id"])
-                if len(candidate_ids) >= 5:
-                    break
+                        if not entry or not entry.get("id"):
+                            continue
+                        c_title = entry.get("title") or ""
+                        c_dur = entry.get("duration") or 0
+                        c_uploader = entry.get("uploader") or ""
+                        score = _score_audio_candidate(c_title, c_uploader, c_dur, title, artist, duration)
+                        if score > 0:
+                            candidates.append((score, f"https://www.youtube.com/watch?v={entry['id']}", c_title, c_dur, "YouTube"))
             except Exception as e:
-                logger.warning(f"YouTube search query '{q}' error: {e}")
+                logger.warning(f"YouTube search error for query '{q}': {e}")
+
+    # 2. Gather SoundCloud candidates
+    for q in search_queries[:2]:
+        try:
+            with yt_dlp.YoutubeDL({'extract_flat': True, 'quiet': True}) as sc_ydl:
+                sc_res = sc_ydl.extract_info(f"scsearch8:{q}", download=False)
+                if sc_res and sc_res.get("entries"):
+                    for entry in sc_res["entries"]:
+                        if not entry or not entry.get("url"):
+                            continue
+                        c_title = entry.get("title") or ""
+                        c_dur = entry.get("duration") or 0
+                        c_uploader = entry.get("uploader") or ""
+                        score = _score_audio_candidate(c_title, c_uploader, c_dur, title, artist, duration)
+                        if score > 0:
+                            candidates.append((score, entry["url"], c_title, c_dur, "SoundCloud"))
+        except Exception as e:
+            logger.warning(f"SoundCloud search error for query '{q}': {e}")
+
+    seen_urls = set()
+    unique_candidates = []
+    for cand in candidates:
+        if cand[1] not in seen_urls:
+            seen_urls.add(cand[1])
+            unique_candidates.append(cand)
+
+    unique_candidates.sort(key=lambda x: -x[0])
 
     downloaded = False
     last_err = None
 
-    for vid in candidate_ids:
-        candidate_url = f"https://www.youtube.com/watch?v={vid}"
+    for score, cand_url, cand_title, cand_dur, source in unique_candidates:
+        logger.info(f"Trying candidate [{source}] (score {score:.1f}): '{cand_title}' ({cand_dur}s)")
         try:
             with yt_dlp.YoutubeDL(dl_opts) as dl_ydl:
-                info = dl_ydl.extract_info(candidate_url, download=True)
+                info = dl_ydl.extract_info(cand_url, download=True)
                 if not duration:
                     duration = info.get("duration", 0)
                 downloaded = True
-                logger.info(f"Successfully downloaded stream for '{display_title}' via candidate {vid}")
+                logger.info(f"Successfully downloaded stream for '{display_title}' via {source}: '{cand_title}'")
                 break
         except Exception as e:
-            logger.warning(f"Candidate {vid} failed ({e}), trying next candidate...")
+            logger.warning(f"Candidate {cand_url} failed ({e}), trying next candidate...")
             last_err = e
             continue
-
-    # Step 2: Fall back to SoundCloud if YouTube is blocked by bot detection
-    if not downloaded:
-        if progress_cb:
-            progress_cb(20, "YouTube stream restricted; searching high-res audio stream...")
-        for q in queries:
-            try:
-                with yt_dlp.YoutubeDL({'extract_flat': True, 'quiet': True}) as sc_ydl:
-                    sc_res = sc_ydl.extract_info(f"scsearch3:{q}", download=False)
-                    if sc_res and sc_res.get("entries"):
-                        for sc_entry in sc_res["entries"]:
-                            if not sc_entry or not sc_entry.get("url"):
-                                continue
-                            try:
-                                with yt_dlp.YoutubeDL(dl_opts) as dl_ydl:
-                                    sc_info = dl_ydl.extract_info(sc_entry["url"], download=True)
-                                    if not duration:
-                                        duration = sc_info.get("duration", 0)
-                                    downloaded = True
-                                    logger.info(f"Successfully downloaded stream for '{display_title}' via SoundCloud: {sc_entry.get('title')}")
-                                    break
-                            except Exception as sc_err:
-                                logger.warning(f"SoundCloud candidate failed ({sc_err})")
-                                last_err = sc_err
-                    if downloaded:
-                        break
-            except Exception as e:
-                logger.warning(f"SoundCloud search query '{q}' error: {e}")
-
-    if not downloaded:
-        try:
-            with yt_dlp.YoutubeDL(dl_opts) as ydl:
-                info = ydl.extract_info(f"ytsearch1:{queries[0]}", download=True)
-                downloaded = True
-        except Exception as e:
-            last_err = e
 
     if not downloaded:
         raise RuntimeError(f"Could not download audio stream for Spotify track '{display_title}': {last_err}")

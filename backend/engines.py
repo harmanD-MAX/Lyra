@@ -111,10 +111,10 @@ def choose_engine(model_info: dict, requested: str = "auto") -> tuple:
     bench = read_engine_choices().get(model_info["id"])
     if bench and opts.get(bench["engine"]):
         return bench["engine"], "benchmark winner for this voice"
-    if opts["seedvc"]:
-        return "seedvc", "default (Seed-VC installed, reference available)"
     if opts["rvc"]:
-        return "rvc", "default (Seed-VC not set up for this voice)"
+        return "rvc", "trained RVC model available"
+    if opts["seedvc"]:
+        return "seedvc", "Seed-VC reference available"
     return "rvc", "no engine ready; formant fallback"
 
 
