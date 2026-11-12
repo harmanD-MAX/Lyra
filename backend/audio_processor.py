@@ -150,6 +150,9 @@ def resolve_spotify_track_info(url: str) -> dict:
         url = f"https://open.spotify.com/track/{track_id}"
 
     track_match = re.search(r"track[/:]([a-zA-Z0-9]+)", url)
+    album_match = re.search(r"album[/:]([a-zA-Z0-9]+)", url)
+    playlist_match = re.search(r"playlist[/:]([a-zA-Z0-9]+)", url)
+
     track_id = track_match.group(1) if track_match else None
     clean_url = f"https://open.spotify.com/track/{track_id}" if track_id else url
 
@@ -158,30 +161,65 @@ def resolve_spotify_track_info(url: str) -> dict:
     thumbnail = ""
     duration = 0
 
-    # Layer 1: Fetch Open Graph meta tags
-    try:
-        req = urllib.request.Request(clean_url, headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9"
-        })
-        with urllib.request.urlopen(req, context=ctx, timeout=8) as r:
-            page = r.read().decode("utf-8", errors="ignore")
+    # Layer 0: If album or playlist, extract the first track from embed state
+    if album_match or playlist_match:
+        embed_type = "album" if album_match else "playlist"
+        item_id = album_match.group(1) if album_match else playlist_match.group(1)
+        try:
+            embed_url = f"https://open.spotify.com/embed/{embed_type}/{item_id}"
+            req = urllib.request.Request(embed_url, headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            })
+            with urllib.request.urlopen(req, context=ctx, timeout=8) as r:
+                html_embed = r.read().decode("utf-8", errors="ignore")
+            m = re.search(r'<script id="(?:__NEXT_DATA__|initial-state)"[^>]*>(.*?)</script>', html_embed)
+            if m:
+                data = json.loads(m.group(1))
+                entity = data.get("props", {}).get("pageProps", {}).get("state", {}).get("data", {}).get("entity", {})
+                tracks = entity.get("trackList", [])
+                if tracks:
+                    t0 = tracks[0]
+                    title = t0.get("title", "").strip()
+                    artist = t0.get("subtitle", "").strip()
+                    duration = int(t0.get("duration", 0) / 1000)
+                    t_uri = t0.get("uri", "")
+                    if t_uri.startswith("spotify:track:"):
+                        track_id = t_uri.split(":")[-1]
+                images = entity.get("visualIdentity", {}).get("image", [])
+                if images and isinstance(images, list):
+                    thumbnail = images[-1].get("url", "")
+            if not thumbnail:
+                og_image = re.search(r'<meta property="og:image" content="([^"]+)"', html_embed)
+                if og_image:
+                    thumbnail = og_image.group(1).strip()
+        except Exception as e:
+            logger.warning(f"Spotify {embed_type} embed extraction error: {e}")
 
-        og_title = re.search(r'<meta property="og:title" content="([^"]+)"', page)
-        og_desc = re.search(r'<meta property="og:description" content="([^"]+)"', page)
-        og_image = re.search(r'<meta property="og:image" content="([^"]+)"', page)
+    # Layer 1: Fetch Open Graph meta tags for tracks
+    if not title:
+        try:
+            req = urllib.request.Request(clean_url, headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9"
+            })
+            with urllib.request.urlopen(req, context=ctx, timeout=8) as r:
+                page = r.read().decode("utf-8", errors="ignore")
 
-        if og_title:
-            title = html.unescape(og_title.group(1)).strip()
-        if og_desc:
-            desc = html.unescape(og_desc.group(1)).strip()
-            parts = [p.strip() for p in desc.split("·")]
-            if parts:
-                artist = parts[0]
-        if og_image:
-            thumbnail = og_image.group(1).strip()
-    except Exception as e:
-        logger.warning(f"Spotify OG tags error for {url}: {e}")
+            og_title = re.search(r'<meta property="og:title" content="([^"]+)"', page)
+            og_desc = re.search(r'<meta property="og:description" content="([^"]+)"', page)
+            og_image = re.search(r'<meta property="og:image" content="([^"]+)"', page)
+
+            if og_title:
+                title = html.unescape(og_title.group(1)).strip()
+            if og_desc:
+                desc = html.unescape(og_desc.group(1)).strip()
+                parts = [p.strip() for p in desc.split("·")]
+                if parts:
+                    artist = parts[0]
+            if og_image:
+                thumbnail = og_image.group(1).strip()
+        except Exception as e:
+            logger.warning(f"Spotify OG tags error for {url}: {e}")
 
     # Layer 2: oEmbed fallback
     if not title or not thumbnail:
@@ -239,12 +277,33 @@ def _get_yt_dlp_opts(out_template: Optional[str] = None) -> dict:
         'format': 'ba/bestaudio/b',
         'noplaylist': True,
         'extract_flat': False,
-        'socket_timeout': 20,
+        'socket_timeout': 25,
         'retries': 5,
         'fragment_retries': 5,
         'quiet': True,
         'no_warnings': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['ios', 'android', 'mweb', 'web'],
+            }
+        },
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
     }
+    # Auto-detect cookies if available in project, backend, or home
+    for cfile in [
+        os.environ.get("YT_COOKIES_PATH"),
+        os.path.join(os.path.dirname(__file__), "cookies.txt"),
+        os.path.join(os.path.dirname(__file__), "..", "cookies.txt"),
+        os.path.expanduser("~/.config/yt-dlp/cookies.txt"),
+    ]:
+        if cfile and os.path.isfile(cfile):
+            opts['cookiefile'] = cfile
+            logger.info(f"Using cookies file for yt-dlp: {cfile}")
+            break
+
     if node_path and os.path.exists(node_path):
         opts['js_runtimes'] = {'node': {'path': node_path}}
     if out_template:
@@ -265,6 +324,7 @@ def download_spotify_audio(url: str, output_dir: str, progress_cb=None) -> dict:
     """
     Downloads high-fidelity audio from a Spotify Track URL by resolving
     metadata and retrieving highest-quality 44.1kHz stereo WAV.
+    Auto-falls back to SoundCloud if YouTube blocks datacenter/cloud IPs.
     Returns metadata dict {audio_path, title, duration, thumbnail, uploader}.
     """
     if progress_cb:
@@ -296,7 +356,7 @@ def download_spotify_audio(url: str, output_dir: str, progress_cb=None) -> dict:
     if progress_cb:
         progress_cb(18, "Downloading audio stream with candidate fallback...")
 
-    # Search for top candidates across queries with automatic fallback
+    # Step 1: Search for top candidates on YouTube
     candidate_ids = []
     search_opts = {**_get_yt_dlp_opts(), 'extract_flat': True}
     with yt_dlp.YoutubeDL(search_opts) as ydl:
@@ -310,7 +370,7 @@ def download_spotify_audio(url: str, output_dir: str, progress_cb=None) -> dict:
                 if len(candidate_ids) >= 5:
                     break
             except Exception as e:
-                logger.warning(f"Search query '{q}' error: {e}")
+                logger.warning(f"YouTube search query '{q}' error: {e}")
 
     downloaded = False
     last_err = None
@@ -329,6 +389,34 @@ def download_spotify_audio(url: str, output_dir: str, progress_cb=None) -> dict:
             logger.warning(f"Candidate {vid} failed ({e}), trying next candidate...")
             last_err = e
             continue
+
+    # Step 2: Fall back to SoundCloud if YouTube is blocked by bot detection
+    if not downloaded:
+        if progress_cb:
+            progress_cb(20, "YouTube stream restricted; searching high-res audio stream...")
+        for q in queries:
+            try:
+                with yt_dlp.YoutubeDL({'extract_flat': True, 'quiet': True}) as sc_ydl:
+                    sc_res = sc_ydl.extract_info(f"scsearch3:{q}", download=False)
+                    if sc_res and sc_res.get("entries"):
+                        for sc_entry in sc_res["entries"]:
+                            if not sc_entry or not sc_entry.get("url"):
+                                continue
+                            try:
+                                with yt_dlp.YoutubeDL(dl_opts) as dl_ydl:
+                                    sc_info = dl_ydl.extract_info(sc_entry["url"], download=True)
+                                    if not duration:
+                                        duration = sc_info.get("duration", 0)
+                                    downloaded = True
+                                    logger.info(f"Successfully downloaded stream for '{display_title}' via SoundCloud: {sc_entry.get('title')}")
+                                    break
+                            except Exception as sc_err:
+                                logger.warning(f"SoundCloud candidate failed ({sc_err})")
+                                last_err = sc_err
+                    if downloaded:
+                        break
+            except Exception as e:
+                logger.warning(f"SoundCloud search query '{q}' error: {e}")
 
     if not downloaded:
         try:
@@ -363,6 +451,7 @@ def download_spotify_audio(url: str, output_dir: str, progress_cb=None) -> dict:
 def download_youtube_audio(url: str, output_dir: str, progress_cb=None) -> dict:
     """
     Downloads audio from YouTube with yt-dlp in highest quality 44.1kHz WAV.
+    Auto-falls back to oEmbed + high-fidelity streaming if YouTube blocks the IP.
     Returns metadata dict {audio_path, title, duration, thumbnail, uploader}.
     """
     import urllib.parse as urlparse
@@ -371,15 +460,24 @@ def download_youtube_audio(url: str, output_dir: str, progress_cb=None) -> dict:
     if "spotify.com" in url or url.startswith("spotify:"):
         return download_spotify_audio(url, output_dir, progress_cb=progress_cb)
 
-    # Strip playlist and radio mix params so yt-dlp only downloads the targeted song
+    # Robust video ID extraction supporting all YouTube URL formats
+    video_id = None
     try:
-        parsed = urlparse.urlparse(url)
-        if "youtube.com" in parsed.netloc and "watch" in parsed.path:
-            qs = urlparse.parse_qs(parsed.query)
-            if "v" in qs:
-                url = f"https://www.youtube.com/watch?v={qs['v'][0]}"
+        parsed = urlparse.urlparse(url.strip())
+        if "youtu.be" in parsed.netloc:
+            video_id = parsed.path.strip("/").split("/")[0].split("?")[0]
+        elif "youtube.com" in parsed.netloc:
+            if "watch" in parsed.path:
+                qs = urlparse.parse_qs(parsed.query)
+                video_id = qs.get("v", [None])[0]
+            elif "shorts" in parsed.path or "embed" in parsed.path:
+                parts = [p for p in parsed.path.strip("/").split("/") if p]
+                if len(parts) >= 2:
+                    video_id = parts[1].split("?")[0]
     except Exception as e:
         logger.warning(f"Could not parse YouTube URL {url}: {e}")
+
+    clean_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else url.strip()
 
     os.makedirs(output_dir, exist_ok=True)
     out_template = os.path.join(output_dir, "input_audio.%(ext)s")
@@ -389,17 +487,66 @@ def download_youtube_audio(url: str, output_dir: str, progress_cb=None) -> dict:
 
     ydl_opts = _get_yt_dlp_opts(out_template)
 
+    title = "YouTube Audio"
+    duration = 0
+    thumbnail = ""
+    uploader = "Unknown Artist"
+    downloaded = False
+    last_err = None
+
+    # Step 1: Try direct download with yt-dlp
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+            info = ydl.extract_info(clean_url, download=True)
             title = info.get('title', 'YouTube Audio')
             duration = info.get('duration', 0)
             thumbnail = info.get('thumbnail', '')
             uploader = info.get('uploader', 'Unknown Artist')
+            downloaded = True
     except Exception as e:
-        err_msg = str(e)
-        if "Sign in to confirm" in err_msg or "unavailable" in err_msg.lower():
-            raise RuntimeError("YouTube video is unavailable, deleted (404), or restricted. Please try another link or upload the audio directly.")
+        last_err = e
+        logger.warning(f"Direct YouTube download failed: {e}")
+
+    # Step 2: If direct download failed due to bot-check or 403, resolve via oEmbed & alternative stream
+    if not downloaded:
+        if progress_cb:
+            progress_cb(15, "YouTube stream restricted; resolving title & alternative stream...")
+        try:
+            oembed_url = f"https://www.youtube.com/oembed?url={urllib.parse.quote(clean_url)}&format=json"
+            req = urllib.request.Request(oembed_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                o_data = json.loads(r.read().decode())
+                if o_data.get("title"):
+                    title = o_data["title"]
+                if o_data.get("author_name"):
+                    uploader = o_data["author_name"]
+                if o_data.get("thumbnail_url"):
+                    thumbnail = o_data["thumbnail_url"]
+
+            search_query = f"{uploader} {title} audio".strip()
+            with yt_dlp.YoutubeDL({'extract_flat': True, 'quiet': True}) as sc_ydl:
+                sc_res = sc_ydl.extract_info(f"scsearch3:{search_query}", download=False)
+                if sc_res and sc_res.get("entries"):
+                    for sc_entry in sc_res["entries"]:
+                        if not sc_entry or not sc_entry.get("url"):
+                            continue
+                        try:
+                            with yt_dlp.YoutubeDL(ydl_opts) as dl_ydl:
+                                sc_info = dl_ydl.extract_info(sc_entry["url"], download=True)
+                                if not duration:
+                                    duration = sc_info.get("duration", 0)
+                                downloaded = True
+                                logger.info(f"Successfully downloaded stream for '{title}' via alternative stream")
+                                break
+                        except Exception as sc_err:
+                            logger.warning(f"Alternative stream candidate failed: {sc_err}")
+        except Exception as oerr:
+            logger.warning(f"oEmbed fallback failed: {oerr}")
+
+    if not downloaded:
+        err_msg = str(last_err)
+        if "Sign in to confirm" in err_msg or "bot" in err_msg.lower():
+            raise RuntimeError("YouTube bot check triggered on server. Please upload the audio file directly, or use a Spotify link.")
         raise RuntimeError(f"Failed to download YouTube audio: {err_msg}")
         
     wav_path = os.path.join(output_dir, "input_audio.wav")

@@ -175,6 +175,7 @@ export default function StudioView({
   activeJobId,
   setActiveJobId,
   errorMsg,
+  setErrorMsg,
   recentJobs,
   sysInfo,
   onStartConversion,
@@ -1412,7 +1413,7 @@ export default function StudioView({
             <div className="w-full md:h-full flex flex-col gap-3 md:overflow-hidden animate-fadeIn">
 
               {/* Rendering: live pipeline status */}
-              {(isSubmitting || currentJob?.status === 'error') && currentJob && (
+              {(isSubmitting || (activeJobId && (currentJob?.status === 'processing' || currentJob?.status === 'queued'))) && currentJob && (
                 <div className="animate-fadeIn my-auto max-w-4xl w-full mx-auto">
                   <ProcessingStatus job={currentJob} selectedModel={selectedModel} onReset={onResetJob} />
                 </div>
@@ -1782,9 +1783,21 @@ export default function StudioView({
 
               {/* Error */}
               {errorMsg && (
-                <div className="flex-shrink-0 px-4 py-3 rounded-2xl bg-rose-500/10 border border-rose-500/25 text-rose-200 text-sm flex items-center gap-2.5 animate-fadeIn">
-                  <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
-                  <span>{errorMsg}</span>
+                <div className="flex-shrink-0 px-4 py-3 rounded-2xl bg-rose-500/10 border border-rose-500/25 text-rose-200 text-sm flex items-center justify-between gap-3 animate-fadeIn">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+                    <span className="break-words leading-relaxed">{errorMsg}</span>
+                  </div>
+                  {setErrorMsg && (
+                    <button
+                      type="button"
+                      onClick={() => setErrorMsg('')}
+                      className="p-1 rounded-lg text-rose-400 hover:text-white hover:bg-rose-500/20 transition-colors shrink-0"
+                      title="Dismiss error"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -1837,9 +1850,9 @@ export default function StudioView({
                     </div>
                   </div>
 
-                  <div className="grid lg:grid-cols-[1.15fr_1fr] gap-4 md:flex-1 md:min-h-0">
+                  <div className="grid lg:grid-cols-[1.15fr_1fr] gap-4">
                     {/* LEFT: source */}
-                    <div className="flex flex-col gap-3 min-h-0">
+                    <div className="flex flex-col gap-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="eyebrow text-white/45"><span className="text-[#e5a958]">01</span> Source</span>
                         <div className="seg">
@@ -2104,7 +2117,7 @@ export default function StudioView({
                     </div>
 
                     {/* RIGHT: voice + engine */}
-                    <div className="flex flex-col gap-4 min-h-0">
+                    <div className="flex flex-col gap-4">
                       <div>
                         <span className="eyebrow text-white/45"><span className="text-[#e5a958]">02</span> Voice</span>
                         <div className="mt-2.5 grid grid-cols-2 gap-2">
@@ -2183,7 +2196,7 @@ export default function StudioView({
                     type="button"
                     onClick={handleConvertTrigger}
                     disabled={isSubmitting || !hasValidInput}
-                    className={`btn btn-lg w-full flex-shrink-0 ${isSubmitting || !hasValidInput ? 'btn-secondary' : 'btn-primary shine-btn'}`}
+                    className={`btn btn-lg w-full mt-4 flex-shrink-0 ${isSubmitting || !hasValidInput ? 'btn-secondary' : 'btn-primary shine-btn'}`}
                   >
                     {isSubmitting ? (
                       <><span className="eq-loader"><span /><span /><span /><span /></span> Converting…</>

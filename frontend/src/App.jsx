@@ -178,9 +178,10 @@ export default function App() {
             fetchRecentJobs();
           }
           if (job.status === 'error') {
-            // Back to the song form (the take is kept) with the reason, instead of an empty screen
+            // Back to the song form (the take is kept) with the reason
             setErrorMsg(`Conversion failed: ${job.error || job.message || 'unknown error'}`);
             setActiveJobId(null);
+            setCurrentJob(null);
           }
         })
         .catch(err => {
@@ -374,6 +375,7 @@ export default function App() {
           activeJobId={activeJobId}
           setActiveJobId={setActiveJobId}
           errorMsg={errorMsg}
+          setErrorMsg={setErrorMsg}
           recentJobs={recentJobs}
           sysInfo={sysInfo}
           onStartConversion={handleStartConversion}
