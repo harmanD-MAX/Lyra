@@ -4,7 +4,7 @@ Voice engines.
     rvc     RVC v2 (40k / 48k) - Lyra's built-in engine. Needs a trained model
             (.pth + .index). Best pitch accuracy and audio cleanliness.
     seedvc  Seed-VC singing (DiT + Whisper + BigVGAN, 44.1 kHz, F0-conditioned).
-            Zero-shot from a ~20s reference clip of the target voice, or a
+            Zero-shot from a ~25s reference clip of the target voice, or a
             fine-tuned checkpoint. Clearer lyrics and closer likeness in
             Seed-VC's published singing evaluation against RVCv2-48k.
 
@@ -40,7 +40,7 @@ SEEDVC_DIR = os.environ.get("LYRA_SEEDVC_DIR", os.path.join(BASE_DIR, "third_par
 SEEDVC_SINGING_CONFIG = "configs/presets/config_dit_mel_seed_uvit_whisper_base_f0_44k.yml"
 ENGINE_CHOICE_PATH = os.path.join(BASE_DIR, "models", "engine_choice.json")
 REFERENCE_NAME = "reference.wav"
-REFERENCE_SECONDS = 20.0
+REFERENCE_SECONDS = 25.0  # Seed-VC uses up to 25 s of the reference
 
 ENGINE_LABELS = {
     "rvc": "RVC v2",
@@ -122,10 +122,49 @@ def choose_engine(model_info: dict, requested: str = "auto") -> tuple:
 # Reference clips
 # ---------------------------------------------------------------------------
 
+REFERENCE_MIN_PHRASE = 1.5    # seconds
+REFERENCE_MAX_PHRASE = 8.0
+
+
+def _split_long_phrase(seg: np.ndarray, sr: int, max_len: float = REFERENCE_MAX_PHRASE) -> List[np.ndarray]:
+    """Cut a long phrase at its quietest moments (never mid-word on a hard length limit)."""
+    out = [seg]
+    while len(out[-1]) > max_len * sr:
+        cur = out.pop()
+        lo, hi = int(sr * REFERENCE_MIN_PHRASE), min(len(cur) - int(sr * REFERENCE_MIN_PHRASE), int(sr * max_len))
+        if hi <= lo:
+            out.append(cur[: int(sr * max_len)])
+            break
+        win = int(sr * 0.05)
+        energy = np.convolve(cur[lo:hi] ** 2, np.ones(win) / win, mode="same")
+        cut = lo + int(np.argmin(energy))
+        out += [cur[:cut], cur[cut:]]
+    return out
+
+
+def _phrase_score(seg: np.ndarray, sr: int) -> Optional[dict]:
+    """How good a phrase is as a voice sample: clean, tonal, steady pitch. None = unusable."""
+    import librosa
+    if np.mean(np.abs(seg) > 0.985) > 0.0005:
+        return None  # clipped / distorted
+    rms_db = 20.0 * np.log10(np.sqrt(np.mean(seg ** 2)) + 1e-9)
+    flatness = float(np.mean(librosa.feature.spectral_flatness(y=seg, n_fft=2048, hop_length=512)))
+    try:
+        f0 = librosa.yin(seg, fmin=70, fmax=1000, sr=sr, frame_length=2048, hop_length=512)
+        midi = 69 + 12 * np.log2(f0 / 440.0)
+        jitter = float(np.median(np.abs(np.diff(midi))))
+    except Exception:
+        jitter = 1.0
+    return {"rms_db": rms_db, "flatness": flatness, "jitter": jitter}
+
+
 def build_reference(audio_paths: List[str], out_path: str, seconds: float = REFERENCE_SECONDS) -> Optional[str]:
     """
-    Make a clean ~20s reference from a voice's recordings: the loudest
-    (most clearly voiced) 2-6s phrases, joined with short gaps.
+    Make a clean ~25s reference of a voice for Seed-VC from its recordings.
+
+    The best phrases are steady, clearly sung ones at a comfortable level, not
+    the loudest: belted or clipped phrases teach Seed-VC a strained, rough
+    version of the voice. Long phrases are cut at pauses, never mid-word.
     """
     import librosa
     sr = 44100
@@ -136,17 +175,34 @@ def build_reference(audio_paths: List[str], out_path: str, seconds: float = REFE
         except Exception:
             continue
         for s, e in librosa.effects.split(y, top_db=35):
-            seg = y[s:e]
-            if len(seg) < sr * 1.5:
-                continue
-            seg = seg[: int(sr * 6)]
-            phrases.append((float(np.sqrt(np.mean(seg ** 2))), seg))
+            for seg in _split_long_phrase(y[s:e], sr):
+                if len(seg) < sr * REFERENCE_MIN_PHRASE:
+                    continue
+                score = _phrase_score(seg, sr)
+                if score is not None:
+                    phrases.append((score, seg))
     if not phrases:
         return None
-    phrases.sort(key=lambda x: -x[0])
+
+    # Rank: tonal (low flatness), steady (low jitter), loudness close to the voice's typical level
+    typical = float(np.median([sc["rms_db"] for sc, _ in phrases]))
+    def rank(item):
+        sc, _ = item
+        return (abs(sc["rms_db"] - typical) / 6.0
+                + sc["flatness"] * 20.0
+                + min(sc["jitter"], 2.0) * 2.0)
+    phrases.sort(key=rank)
+
     out, total = [], 0
     gap = np.zeros(int(sr * 0.15), dtype=np.float32)
+    fade = int(sr * 0.01)
+    ramp = np.linspace(0.0, 1.0, fade, dtype=np.float32)
     for _, seg in phrases:
+        seg = seg.astype(np.float32).copy()
+        # level each phrase to the typical loudness so the sample is even
+        seg *= 10.0 ** ((typical - 20.0 * np.log10(np.sqrt(np.mean(seg ** 2)) + 1e-9)) / 20.0)
+        seg[:fade] *= ramp
+        seg[-fade:] *= ramp[::-1]
         out += [seg, gap]
         total += len(seg)
         if total >= sr * seconds:
@@ -171,16 +227,26 @@ def _python() -> str:
     return os.environ.get("LYRA_SEEDVC_PYTHON", sys.executable)
 
 
+GUIDED_SCRIPT = os.path.join(BASE_DIR, "tools", "seedvc_guided.py")
+
+
 def convert_seedvc(source_wav: str, model_info: dict, out_wav: str, semitones: int = 0,
-                   diffusion_steps: int = 40, progress_cb: Optional[Callable] = None) -> str:
+                   diffusion_steps: int = 40, f0_curve: Optional[np.ndarray] = None, f0_fps: float = 100.0,
+                   progress_cb: Optional[Callable] = None) -> str:
+    """
+    Render `source_wav` in the target voice with Seed-VC.
+
+    f0_curve: Lyra's cleaned (and optionally corrected) melody for the source, in Hz
+    with 0 for unvoiced frames, at `f0_fps`. When given, Seed-VC sings this curve
+    instead of re-reading the pitch from the audio (see tools/seedvc_guided.py).
+    """
     if not seedvc_available():
         raise RuntimeError("Seed-VC is not installed (run backend/tools/setup_seedvc.sh)")
     reference = reference_path(model_info)
     if not has_reference(model_info):
         raise RuntimeError(f"No reference clip for {model_info['name']}")
     work = tempfile.mkdtemp(prefix="lyra_seedvc_")
-    cmd = [
-        _python(), "inference.py",
+    args = [
         "--source", os.path.abspath(source_wav),
         "--target", os.path.abspath(reference),
         "--output", work,
@@ -193,10 +259,24 @@ def convert_seedvc(source_wav: str, model_info: dict, out_wav: str, semitones: i
     ]
     ft = seedvc_checkpoint(model_info)
     if ft:
-        cmd += ["--checkpoint", os.path.abspath(ft[0]), "--config", os.path.abspath(ft[1])]
+        args += ["--checkpoint", os.path.abspath(ft[0]), "--config", os.path.abspath(ft[1])]
     if progress_cb:
         progress_cb(72, f"Seed-VC singing diffusion ({diffusion_steps} steps) for {model_info['name']}...")
-    proc = subprocess.run(cmd, cwd=SEEDVC_DIR, capture_output=True, text=True)
+
+    proc = None
+    if f0_curve is not None and os.path.exists(GUIDED_SCRIPT):
+        curve_path = os.path.join(work, "lyra_f0.npy")
+        np.save(curve_path, np.asarray(f0_curve, dtype=np.float32))
+        cmd = [_python(), GUIDED_SCRIPT, "--lyra-f0", curve_path, "--lyra-f0-fps", str(float(f0_fps))] + args
+        proc = subprocess.run(cmd, cwd=SEEDVC_DIR, capture_output=True, text=True)
+        if proc.returncode != 0 or "[lyra] using Lyra's cleaned pitch curve" not in proc.stdout:
+            logger.warning(f"Seed-VC with Lyra's pitch curve failed; using Seed-VC's own pitch read: "
+                           f"{(proc.stderr or proc.stdout)[-800:]}")
+            for f in glob.glob(os.path.join(work, "*.wav")):
+                os.remove(f)
+            proc = None
+    if proc is None:
+        proc = subprocess.run([_python(), "inference.py"] + args, cwd=SEEDVC_DIR, capture_output=True, text=True)
     if proc.returncode != 0:
         shutil.rmtree(work, ignore_errors=True)
         raise RuntimeError(f"Seed-VC failed: {proc.stderr[-1500:]}")
@@ -210,11 +290,30 @@ def convert_seedvc(source_wav: str, model_info: dict, out_wav: str, semitones: i
     return out_wav
 
 
-def finetune_seedvc(clip_paths: List[str], model_info: dict, steps: int = 600,
+def seedvc_steps_for(total_seconds: float) -> int:
+    """
+    Fine-tune length for the amount of clean singing available. Short runs copy
+    the voice's colour; smooth, steady singing needs more steps.
+    """
+    minutes = total_seconds / 60.0
+    if minutes < 3.0:
+        return 1000
+    return int(min(5000, max(2000, 250 * minutes)))
+
+
+def finetune_seedvc(clip_paths: List[str], model_info: dict, steps: Optional[int] = None,
                     progress_cb: Optional[Callable[[float, str], None]] = None) -> Optional[tuple]:
     """Fine-tune the Seed-VC singing model on a voice's clips (1-30s each)."""
     if not seedvc_available():
         return None
+    if not steps:
+        total = 0.0
+        for p in clip_paths:
+            try:
+                total += sf.info(p).duration
+            except Exception:
+                pass
+        steps = seedvc_steps_for(total)
     run_name = f"lyra_{model_info['id']}"
     data_dir = tempfile.mkdtemp(prefix="lyra_seedvc_data_")
     for i, p in enumerate(clip_paths):

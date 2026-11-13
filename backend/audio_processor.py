@@ -1120,81 +1120,6 @@ def _apply_arijit_formant_modeling(input_wav: str, output_wav: str, pitch_shift:
     _apply_formant_modeling(input_wav, output_wav, singer="arijit", pitch_shift=pitch_shift)
 
 
-def _enhance_hindi_diction_and_consonants(
-    vocal: np.ndarray,
-    raw_vocal_path: Optional[str],
-    sr: int
-) -> np.ndarray:
-    """
-    Studio Vocal De-Harshing, Velvet Warmth & Intelligibility Engine:
-    1. De-Harshing Notch (3.4kHz - 5.2kHz): Soothing -2.5dB dip that eliminates digital vocoder buzz & metallic fatigue.
-    2. Warmth & Chest Resonance (200Hz - 340Hz): Enriches lower fundamentals (+2.2dB) for Arijit / Sonu's warm, soulful body.
-    3. Dynamic Sibilance Softener (5.8kHz - 8.5kHz): Tames harsh "s", "sh", and consonant spikes.
-    4. Clean Sub-Cut (80Hz): Removes sub-rumble for tight, punchy dynamics.
-    5. Silk Air Sheen (10.5kHz - 14kHz): Adds velvety top-end sparkle (+1.0dB) without harshness.
-    """
-    if vocal.ndim == 1:
-        vocal = np.column_stack([vocal, vocal])
-    elif vocal.ndim == 2 and vocal.shape[1] == 1:
-        vocal = np.column_stack([vocal[:, 0], vocal[:, 0]])
-    elif vocal.shape[1] > 2:
-        vocal = vocal[:, :2]
-
-    # 1. Clean Sub-80Hz Rumble
-    try:
-        sos_locut = signal.butter(2, 80, 'hp', fs=sr, output='sos')
-        vocal[:, 0] = signal.sosfilt(sos_locut, vocal[:, 0])
-        vocal[:, 1] = signal.sosfilt(sos_locut, vocal[:, 1])
-    except Exception as e:
-        logger.warning(f"Sub-cut fallback: {e}")
-
-    # 2. Warm Chest Body (200Hz - 340Hz): +2.2dB
-    try:
-        sos_chest = signal.butter(2, [200, 340], 'bandpass', fs=sr, output='sos')
-        chest_l = signal.sosfilt(sos_chest, vocal[:, 0])
-        chest_r = signal.sosfilt(sos_chest, vocal[:, 1])
-        vocal[:, 0] += chest_l * 0.25
-        vocal[:, 1] += chest_r * 0.25
-    except Exception as e:
-        logger.warning(f"Chest warmth fallback: {e}")
-
-    # 3. De-Harshing Notch (3.4kHz - 5.2kHz): Soothing -2.5dB dip (removes metallic vocoder grit)
-    try:
-        sos_harsh = signal.butter(2, [3400, 5200], 'bandpass', fs=sr, output='sos')
-        harsh_l = signal.sosfilt(sos_harsh, vocal[:, 0])
-        harsh_r = signal.sosfilt(sos_harsh, vocal[:, 1])
-        vocal[:, 0] -= harsh_l * 0.22
-        vocal[:, 1] -= harsh_r * 0.22
-    except Exception as e:
-        logger.warning(f"De-harshing fallback: {e}")
-
-    # 4. Dynamic Sibilance Softener (5.8kHz - 8.5kHz)
-    try:
-        sos_sib = signal.butter(2, [5800, 8500], 'bandpass', fs=sr, output='sos')
-        sib_l = signal.sosfilt(sos_sib, vocal[:, 0])
-        sib_r = signal.sosfilt(sos_sib, vocal[:, 1])
-        sib_env = uniform_filter1d(np.abs(sib_l + sib_r) * 0.5, size=int(sr * 0.008))
-        # Subsample for percentile calculation to avoid memory explosion when sorting 10M samples
-        thresh = np.percentile(sib_env[::20], 92) + 1e-6
-        suppression = np.clip((sib_env - thresh) / (thresh * 1.5), 0.0, 0.40)
-        vocal[:, 0] -= sib_l * suppression
-        vocal[:, 1] -= sib_r * suppression
-    except Exception as e:
-        logger.warning(f"Sibilance softener fallback: {e}")
-
-    # 5. Silky High-Air Sheen (10.5kHz - 14kHz): Gentle velvet air (+1.0dB)
-    try:
-        sos_air = signal.butter(2, [10500, 14000], 'bandpass', fs=sr, output='sos')
-        air_l = signal.sosfilt(sos_air, vocal[:, 0])
-        air_r = signal.sosfilt(sos_air, vocal[:, 1])
-        vocal[:, 0] += air_l * 0.12
-        vocal[:, 1] += air_r * 0.12
-    except Exception as e:
-        logger.warning(f"Air sheen fallback: {e}")
-
-    return vocal
-
-
 _HALL_IR_CACHE = {}
 
 
@@ -1373,6 +1298,9 @@ def export_clean_unremastered_master(
     return clean_wav, clean_mp3
 
 
+MASTER_REFERENCE_NAME = "master_reference.wav"
+
+
 def master_and_remaster_track(
     vocal_wav: str,
     inst_wav: str,
@@ -1390,6 +1318,7 @@ def master_and_remaster_track(
     center_anchor: float = 1.0,
     presence_boost_db: float = 2.8,
     is_quick_remix: bool = False,
+    master_reference: Optional[str] = None,
     progress_cb=None
 ) -> dict:
     """
@@ -1397,7 +1326,9 @@ def master_and_remaster_track(
     - Lead Vocal Focus (+2.5dB Boost) with pure Hindi lyric diction & sur tracking
     - Reduced Backing Music (-4.5dB Pocket) with intelligent Mid/Side sidechain ducking
     - Hall reverb and stereo depth on a send only: the dry lead stays mono, centred and untouched
-    - Streaming master (-14 LUFS integrated / -1 dBTP true peak)
+    - Streaming master (-14 LUFS integrated / -1 dBTP true peak), or, when a finished
+      reference song is given (or saved as master_reference.wav in output_dir), a
+      reference master matched to that song (Matchering, optional)
     """
     os.makedirs(output_dir, exist_ok=True)
     master_wav = os.path.join(output_dir, "master_remastered.wav")
@@ -1447,8 +1378,9 @@ def master_and_remaster_track(
     vocal[:, 0] = signal.sosfilt(sos_hp, vocal[:, 0])
     vocal[:, 1] = signal.sosfilt(sos_hp, vocal[:, 1])
 
-    # 1. Apply Hindi Diction & Consonant Transient Recovery Engine
-    vocal = _enhance_hindi_diction_and_consonants(vocal, raw_vocal_wav, target_sr)
+    # 1. Studio vocal chain: proper EQ, de-esser and gentle compression
+    import studio_chain
+    vocal = studio_chain.vocal_chain(vocal, target_sr, warmth=warmth, clarity=clarity)
 
     # Keep a copy of pure clean vocal (0 reverb, 0 echo delay, 0 artificial stereo Haas)
     vocal_clean = vocal.copy()
@@ -1534,8 +1466,21 @@ def master_and_remaster_track(
     if progress_cb:
         progress_cb(97, "Mastering for streaming (-14 LUFS, -1 dBTP true-peak limiter)...")
 
-    final_mix = master_for_streaming(final_mix, target_sr)
-    clean_mix = master_for_streaming(clean_mix, target_sr)
+    if master_reference is None:
+        saved_ref = os.path.join(output_dir, MASTER_REFERENCE_NAME)
+        master_reference = saved_ref if os.path.exists(saved_ref) else None
+    matched = None
+    if master_reference:
+        import studio_chain
+        if progress_cb:
+            progress_cb(97, "Mastering to match your reference song...")
+        matched = studio_chain.reference_master(final_mix, target_sr, master_reference)
+        matched_clean = studio_chain.reference_master(clean_mix, target_sr, master_reference) if matched is not None else None
+    if matched is not None and matched_clean is not None:
+        final_mix, clean_mix = matched, matched_clean
+    else:
+        final_mix = master_for_streaming(final_mix, target_sr)
+        clean_mix = master_for_streaming(clean_mix, target_sr)
 
     # Export lossless 24-bit WAVs
     sf.write(master_wav, final_mix, target_sr, subtype="PCM_24")

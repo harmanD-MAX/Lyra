@@ -29,6 +29,9 @@ yt-dlp
 gradio_client
 boto3
 
+# Optional: "Match a reference song" mastering (GPL-3.0, installed separately)
+# matchering
+
 # Optional benchmark metrics (tools/benchmark.py)
 # speechbrain
 # openai-whisper

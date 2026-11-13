@@ -551,6 +551,7 @@ async def start_conversion(
     echo_amount: float = Form(0.0),
     warmth: float = Form(0.55),
     clarity: float = Form(0.85),
+    master_reference_file: Optional[UploadFile] = File(None),
     has_music: bool = Form(True),
     apply_autotune: bool = Form(True),
     autotune_strength: Optional[float] = Form(None),
@@ -621,6 +622,7 @@ async def start_conversion(
         echo_amount=echo_amount,
         warmth=warmth,
         clarity=clarity,
+        master_reference=_save_upload(master_reference_file, f"{job_id}_master_ref") if master_reference_file else None,
     )
     JOB_EXECUTOR.submit(run_pipeline, job_id, params)
     return JSONResponse(content={"job_id": job_id, "status": "queued", "message": "Job queued successfully"})
@@ -1294,7 +1296,9 @@ async def quick_remix(
     center_anchor: float = Form(1.0),
     presence_boost_db: float = Form(2.8),
     apply_autotune: bool = Form(True),
-    autotune_strength: float = Form(0.50)
+    autotune_strength: float = Form(0.50),
+    master_reference_file: Optional[UploadFile] = File(None),
+    clear_master_reference: bool = Form(False),
 ):
     """
     Rapidly re-masters and re-mixes existing converted stems with autotune, spiral echo, and reverb without re-running neural RVC.
@@ -1360,6 +1364,18 @@ async def quick_remix(
 
     if not vocal_path:
         raise HTTPException(status_code=404, detail="Vocal stem missing")
+
+    # Optional: master to match a finished reference song (kept for later remixes)
+    saved_ref = os.path.join(job_dir, audio_processor.MASTER_REFERENCE_NAME)
+    if clear_master_reference and os.path.exists(saved_ref):
+        os.remove(saved_ref)
+    if master_reference_file is not None:
+        uploaded = _save_upload(master_reference_file, f"{job_id}_master_ref")
+        await asyncio.to_thread(studio_pipeline.save_master_reference, uploaded, job_dir)
+        try:
+            os.remove(uploaded)
+        except Exception:
+            pass
 
     # Re-run master with the new acoustics & balance (in a worker thread so the server stays responsive)
     await asyncio.to_thread(

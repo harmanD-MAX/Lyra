@@ -38,7 +38,7 @@ SR = 40000  # default; 48000 for the "best" preset
 PRESETS = {
     "quick": {"steps": 1000, "sample_rate": 40000, "seedvc_steps": 0},
     "standard": {"steps": 2000, "sample_rate": 40000, "seedvc_steps": 0},
-    "best": {"steps": 4000, "sample_rate": 48000, "seedvc_steps": 600},
+    "best": {"steps": 4000, "sample_rate": 48000, "seedvc_steps": "auto"},  # auto: scaled to minutes of singing
 }
 
 
@@ -493,7 +493,6 @@ def train_personal_voice(voice_id: str, audio_paths: List[str], steps: Optional[
 
         seedvc_ft = None
         if can_seedvc:
-            report(78, "Fine-tuning Seed-VC singing model on your voice...")
             clip_dir = os.path.join(vdir, "_clips")
             os.makedirs(clip_dir, exist_ok=True)
             clip_paths = []
@@ -501,7 +500,10 @@ def train_personal_voice(voice_id: str, audio_paths: List[str], steps: Optional[
                 cp = os.path.join(clip_dir, f"{i:04d}.wav")
                 sf.write(cp, c, sr)
                 clip_paths.append(cp)
-            seedvc_ft = engines.finetune_seedvc(clip_paths, model_info, steps=cfg_preset["seedvc_steps"])
+            ft_steps = cfg_preset["seedvc_steps"]
+            ft_steps = engines.seedvc_steps_for(total_sec) if ft_steps == "auto" else int(ft_steps)
+            report(78, f"Fine-tuning Seed-VC singing model on your voice ({ft_steps} steps)...")
+            seedvc_ft = engines.finetune_seedvc(clip_paths, model_info, steps=ft_steps)
             import shutil
             shutil.rmtree(clip_dir, ignore_errors=True)
             audio_processor.clear_memory()

@@ -76,6 +76,7 @@ class JobParams:
     echo_amount: float = 0.0
     warmth: float = 0.55
     clarity: float = 0.85
+    master_reference: Optional[str] = None  # a finished song to match when mastering (optional)
 
     def to_dict(self):
         return asdict(self)
@@ -115,6 +116,18 @@ def ingest(source_type: str, file_path: Optional[str], url: Optional[str], work_
                        capture_output=True, check=True)
         res["audio_path"] = std
     return res
+
+
+def save_master_reference(src_path: str, job_dir: str) -> Optional[str]:
+    """Keep a reference song beside the job (44.1 kHz stereo) so every remix masters to it."""
+    dest = os.path.join(job_dir, audio_processor.MASTER_REFERENCE_NAME)
+    try:
+        subprocess.run(["ffmpeg", "-y", "-i", src_path, "-ar", "44100", "-ac", "2", dest],
+                       capture_output=True, check=True)
+        return dest
+    except Exception as e:
+        logger.warning(f"Could not read the mastering reference song: {e}")
+        return None
 
 
 def _mono(path: str):
@@ -212,10 +225,29 @@ def export_stems(job_dir: str, stems: dict) -> dict:
 # rendering
 # ---------------------------------------------------------------------------
 
+def _correct_curve(f0: np.ndarray, fps: float, pitch_options: Optional[dict], key, strength: float,
+                   guide_f0: Optional[np.ndarray], shift: int = 0, harmony_degrees: int = 0,
+                   retune_ms: float = 40.0, vibrato: float = 0.0) -> np.ndarray:
+    """Apply the melody engine (scale / guide correction, harmony) to an F0 curve."""
+    f0_out = np.asarray(f0, dtype=np.float64) * (2 ** (shift / 12.0))
+    if pitch_options:
+        if guide_f0 is not None:
+            g = np.asarray(guide_f0, dtype=np.float64) * (2 ** (shift / 12.0))
+            g = np.pad(g, (0, max(0, len(f0_out) - len(g))))[: len(f0_out)]
+            f0_out = melody.align_to_guide(f0_out, g, fps=fps, strength=strength, key=key,
+                                           use_dtw=pitch_options.get("guide_dtw", False), retune_ms=retune_ms)
+        else:
+            f0_out = melody.correct_pitch(f0_out, fps=fps, key=key, strength=strength, retune_ms=retune_ms,
+                                          steadiness=pitch_options.get("steadiness", 0.5), vibrato=vibrato)
+    if harmony_degrees:
+        f0_out = melody.harmony_f0(f0_out, fps=fps, key=key, degrees=harmony_degrees)
+    return f0_out
+
+
 def _world_retune(src: str, out: str, pitch_options: Optional[dict], key, strength: float,
                   guide_lead: Optional[str], shift: int, harmony_degrees: int = 0,
                   retune_ms: float = 40.0, vibrato: float = 0.0, progress=None) -> dict:
-    """Correct the melody of `src` and re-synthesize it in the same voice (WORLD)."""
+    """Correct the melody of `src` and re-synthesize it in the same voice (WORLD). Used by "raw" only."""
     import voice_enhance
     guide_f0 = None
     if pitch_options and pitch_options.get("mode") == "guide" and guide_lead:
@@ -223,21 +255,38 @@ def _world_retune(src: str, out: str, pitch_options: Optional[dict], key, streng
         guide_f0 = voice_enhance.analyse_f0(gy, gsr)
 
     def correct(f0_in, fps_in):
-        f0_out = f0_in * (2 ** (shift / 12.0))
-        if pitch_options:
-            if guide_f0 is not None:
-                g = guide_f0 * (2 ** (shift / 12.0))
-                g = np.pad(g, (0, max(0, len(f0_out) - len(g))))[: len(f0_out)]
-                f0_out = melody.align_to_guide(f0_out, g, fps=fps_in, strength=strength, key=key,
-                                               use_dtw=pitch_options.get("guide_dtw", False), retune_ms=retune_ms)
-            else:
-                f0_out = melody.correct_pitch(f0_out, fps=fps_in, key=key, strength=strength, retune_ms=retune_ms,
-                                              steadiness=pitch_options.get("steadiness", 0.5), vibrato=vibrato)
-        if harmony_degrees:
-            f0_out = melody.harmony_f0(f0_out, fps=fps_in, key=key, degrees=harmony_degrees)
-        return f0_out
+        return _correct_curve(f0_in, fps_in, pitch_options, key, strength, guide_f0, shift,
+                              harmony_degrees, retune_ms, vibrato)
 
     return voice_enhance.retune_world(src, out, correct, progress_cb=progress)
+
+
+def _seedvc_melody(source: str, pitch_options: Optional[dict], key, strength: float,
+                   guide_lead: Optional[str], harmony_degrees: int, p: "JobParams", progress=None) -> tuple:
+    """
+    The melody Seed-VC will sing: RMVPE read of the dry lead, cleaned of tracker
+    errors (melody.clean_f0), then the user's pitch settings (scale / guide /
+    harmony) applied on the curve. No audio is re-synthesized here, so Seed-VC
+    hears the untouched vocal. Returns (f0_hz, fps), unshifted.
+    """
+    import voice_enhance
+    if progress:
+        progress(66, "Reading the melody (RMVPE) and cleaning pitch-tracker errors...")
+    y, sr = _mono(source)
+    f0, fps = voice_enhance.analyse_f0_rmvpe(y, sr)
+    f0 = melody.clean_f0(f0, fps)
+    guide_f0 = None
+    if pitch_options and pitch_options.get("mode") == "guide" and guide_lead:
+        gy, gsr = _mono(guide_lead)
+        g, gfps = voice_enhance.analyse_f0_rmvpe(gy, gsr)
+        guide_f0 = melody.clean_f0(g, gfps)
+        if gfps != fps:
+            t = np.arange(len(f0)) / fps
+            guide_f0 = np.interp(t, np.arange(len(guide_f0)) / gfps, guide_f0)
+    if pitch_options or harmony_degrees:
+        f0 = _correct_curve(f0, fps, pitch_options, key, strength, guide_f0, 0, harmony_degrees,
+                            p.retune_ms, p.vibrato)
+    return np.asarray(f0, dtype=np.float64), float(fps)
 
 
 UNTUNED_LEAD = "converted_vocals_untuned.wav"
@@ -306,14 +355,19 @@ def _render(source: str, out_name: str, job_dir: str, p: "JobParams", model_info
     out = os.path.join(job_dir, out_name)
     if engine == "seedvc":
         try:
-            src, f0, fps = source, None, 100.0
-            if pitch_options or harmony_degrees:
-                # Seed-VC follows the source melody, so correct it first (same voice, WORLD)
-                tuned = os.path.join(job_dir, out_name.replace(".wav", "_tuned_source.wav"))
-                r = _world_retune(source, tuned, pitch_options, key, strength, guide_lead, 0, harmony_degrees,
-                                  p.retune_ms, p.vibrato, progress)
-                src, f0, fps = tuned, r["f0"] * (2 ** (p.pitch_shift / 12.0)), r["fps"]
-            engines.convert_seedvc(src, model_info, out, semitones=p.pitch_shift, progress_cb=progress)
+            # Seed-VC sings Lyra's cleaned melody curve directly; the vocal itself is
+            # never re-synthesized first (no WORLD pass), so no buzz or tracker errors carry over.
+            curve, fps = None, 100.0
+            try:
+                curve, fps = _seedvc_melody(source, pitch_options, key, strength, guide_lead,
+                                            harmony_degrees, p, progress)
+            except Exception as e_mel:
+                logger.warning(f"Melody curve unavailable ({e_mel}); Seed-VC will read the pitch itself")
+                if pitch_options or harmony_degrees:
+                    raise
+            engines.convert_seedvc(source, model_info, out, semitones=p.pitch_shift,
+                                   f0_curve=curve, f0_fps=fps, progress_cb=progress)
+            f0 = curve * (2 ** (p.pitch_shift / 12.0)) if curve is not None else None
             return {"path": out, "f0": f0, "fps": fps, "engine": "seedvc"}
         except Exception as e:
             logger.warning(f"Seed-VC render failed, falling back to RVC: {e}")
@@ -348,6 +402,11 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
     src = ingest(p.source_type, p.file_path, p.url, job_dir, "input_audio", progress)
     meta = {k: src.get(k, "") for k in ("title", "thumbnail", "duration", "uploader")}
 
+    # The engine is known before separation: Seed-VC copies everything it hears
+    # (reverb, backing harmonies, music bleed), so its input is always fully cleaned.
+    planned_engine = None if is_raw else engines.choose_engine(model_info, p.engine)[0]
+    full_clean = planned_engine == "seedvc"
+
     # 1. Separation / cleanup of the main source
     if p.mode == "convert" or p.has_music:
         progress(25, "Separating vocals (RoFormer chain)...")
@@ -356,8 +415,9 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
     sep = separation.separate_pro(
         src["audio_path"], job_dir,
         has_music=p.has_music,
-        split_backing=p.split_backing and p.has_music and not resources.LITE,
-        dereverb=p.dereverb and not resources.LITE,
+        split_backing=p.split_backing and p.has_music and (full_clean or not resources.LITE),
+        dereverb=p.dereverb and (full_clean or not resources.LITE),
+        gate_bleed=full_clean and p.has_music,
         progress_cb=progress,
     )
     converter_input = sep["lead_dry_path"]
@@ -425,7 +485,7 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
                           retune_ms=p.retune_ms, vibrato=p.vibrato, progress=progress)
         f0, fps = r["f0"], r["fps"]
     else:
-        engine, engine_reason = engines.choose_engine(model_info, p.engine)
+        engine, engine_reason = engines.choose_engine(model_info, p.engine)  # same choice as planned_engine
         progress(64, f"Voice engine: {engines.ENGINE_LABELS.get(engine, engine)} ({engine_reason})")
         r = _render(converter_input, "converted_vocals.wav", job_dir, p, model_info, engine,
                     pitch_options, key, strength, guide_lead, progress=progress)
@@ -482,6 +542,12 @@ def run(job_dir: str, p: JobParams, progress: Callable[[int, str], None]) -> dic
 
     # 9. Mix & master
     progress(88, "Mixing and mastering...")
+    if p.master_reference and os.path.exists(p.master_reference):
+        save_master_reference(p.master_reference, job_dir)
+        try:
+            os.remove(p.master_reference)  # the job keeps its own copy
+        except Exception:
+            pass
     try:
         master = audio_processor.master_and_remaster_track(
             vocal_wav=vocal_for_mix, inst_wav=accompaniment, output_dir=job_dir,

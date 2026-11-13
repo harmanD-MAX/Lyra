@@ -145,12 +145,41 @@ def load_stereo_44k(path: str) -> np.ndarray:
     return audio[:2]
 
 
+def gate_bleed_between_phrases(audio_cf: np.ndarray, sr: int, range_db: float = 35.0,
+                               max_cut_db: float = 12.0) -> np.ndarray:
+    """
+    Gently lower leftover music bleed in the gaps between sung phrases of a
+    separated lead (channels, samples). A voice converter turns that bleed into
+    mumbles and false notes. Anything within `range_db` of the vocal's loud
+    level passes untouched; quieter parts are expanded down by at most
+    `max_cut_db`. Opens fast and closes slowly, so word starts and tails stay.
+    """
+    from scipy.ndimage import maximum_filter1d, uniform_filter1d
+    mono = np.mean(audio_cf, axis=0)
+    hop = max(1, int(sr * 0.001))
+    n_blocks = len(mono) // hop
+    if n_blocks < 100:
+        return audio_cf
+    blocks = mono[: n_blocks * hop].reshape(n_blocks, hop)
+    env = np.sqrt(uniform_filter1d(np.mean(blocks ** 2, axis=1), size=20) + 1e-12)
+    level_db = 20.0 * np.log10(env)
+    loud_db = np.percentile(level_db, 95)
+    threshold = loud_db - range_db
+    gain_db = np.clip(level_db - threshold, -max_cut_db, 0.0)  # 1:2 expansion below threshold
+    gain_db = maximum_filter1d(gain_db, size=15)   # look ahead / hold: opens before a word starts
+    gain_db = uniform_filter1d(gain_db, size=60)   # ~60 ms smooth release, no chatter
+    gain = 10.0 ** (gain_db / 20.0)
+    per_sample = np.interp(np.arange(audio_cf.shape[1]), np.arange(n_blocks) * hop + hop / 2.0, gain)
+    return (audio_cf * per_sample[None, :]).astype(audio_cf.dtype)
+
+
 def separate_pro(
     audio_path: str,
     output_dir: str,
     has_music: bool = True,
     split_backing: bool = True,
     dereverb: bool = True,
+    gate_bleed: bool = False,
     progress_cb=None,
 ) -> dict:
     """
@@ -242,6 +271,11 @@ def separate_pro(
             report(56, "Lead vocal cleaned (reverb tails removed).")
         except Exception as e:
             logger.warning(f"De-reverb skipped: {e}")
+    if gate_bleed:
+        try:
+            lead_dry = gate_bleed_between_phrases(lead_dry, STEM_SR)
+        except Exception as e:
+            logger.warning(f"Bleed gate skipped: {e}")
     _write(out["lead_dry_path"], lead_dry)
 
     # Accompaniment = instrumental + original backing vocals

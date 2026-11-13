@@ -187,6 +187,71 @@ def segment_notes(f0: np.ndarray, fps: float = 100.0, min_note_ms: float = 60.0,
 
 
 # ---------------------------------------------------------------------------
+# Pitch-curve cleanup (tracker errors only, no tuning)
+# ---------------------------------------------------------------------------
+
+def clean_f0(f0: np.ndarray, fps: float = 100.0, smooth: float = 0.5) -> np.ndarray:
+    """
+    Remove pitch-tracker mistakes from a sung F0 curve without tuning it.
+
+    Fixed: octave flips, one- or two-frame spikes, frame-to-frame jitter, tiny
+    voiced blips inside silence and short dropouts inside a held note.
+    Kept: every note as sung, slides, ornaments (murkis), vibrato and the gaps
+    of real consonants and breaths. Nothing is snapped to a scale.
+
+    smooth: 0..1, how much frame jitter is smoothed (vibrato up to ~8 Hz is
+    always kept).
+    """
+    from scipy.signal import savgol_filter
+
+    f0 = np.asarray(f0, dtype=np.float64)
+    midi = hz_to_midi(f0)
+    voiced = midi > 0
+    if voiced.sum() < 5:
+        return np.where(voiced, f0, 0.0)
+
+    # 1. Voiced blips shorter than 30 ms are tracker noise (bleed, breath)
+    min_island = max(2, int(round(0.03 * fps)))
+    for s, e in _voiced_runs(voiced):
+        if e - s < min_island:
+            voiced[s:e] = False
+    if voiced.sum() < 5:
+        return np.zeros_like(f0)
+
+    # 2. Bridge dropouts of up to 30 ms inside one held note (both sides within a semitone)
+    max_gap = max(1, int(round(0.03 * fps)))
+    runs = _voiced_runs(voiced)
+    for (s0, e0), (s1, e1) in zip(runs[:-1], runs[1:]):
+        gap = s1 - e0
+        if 0 < gap <= max_gap and abs(midi[e0 - 1] - midi[s1]) < 1.0:
+            midi[e0:s1] = np.linspace(midi[e0 - 1], midi[s1], gap + 2)[1:-1]
+            voiced[e0:s1] = True
+
+    # 3. Octave flips: compare against a slow (150 ms) median of the melody
+    idx = np.arange(len(midi))
+    filled = np.interp(idx, idx[voiced], midi[voiced])
+    ref = median_filter(filled, size=max(5, int(0.15 * fps)) | 1, mode="nearest")
+    dev = midi - ref
+    octave = voiced & (np.abs(dev) > 7.0)
+    midi[octave] -= 12.0 * np.round(dev[octave] / 12.0)
+
+    # 4 + 5. Per sung phrase: remove short spikes, then smooth frame jitter
+    spike_win = max(3, int(round(0.05 * fps)) | 1)
+    jitter_win = max(5, int(round((0.04 + 0.08 * float(np.clip(smooth, 0.0, 1.0))) * fps)) | 1)
+    for s, e in _voiced_runs(voiced):
+        seg = midi[s:e]
+        if len(seg) >= 3:
+            med = median_filter(seg, size=min(spike_win, len(seg) | 1), mode="nearest")
+            spikes = np.abs(seg - med) > 1.0
+            seg = np.where(spikes, med, seg)
+        if smooth > 0 and len(seg) > jitter_win:
+            seg = savgol_filter(seg, jitter_win, 3, mode="interp")
+        midi[s:e] = seg
+
+    return midi_to_hz(midi, voiced)
+
+
+# ---------------------------------------------------------------------------
 # Correction
 # ---------------------------------------------------------------------------
 
