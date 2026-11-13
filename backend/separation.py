@@ -145,14 +145,16 @@ def load_stereo_44k(path: str) -> np.ndarray:
     return audio[:2]
 
 
-def gate_bleed_between_phrases(audio_cf: np.ndarray, sr: int, range_db: float = 35.0,
-                               max_cut_db: float = 12.0) -> np.ndarray:
+def gate_bleed_between_phrases(audio_cf: np.ndarray, sr: int, range_db: float = 42.0,
+                               max_cut_db: float = 9.0, hold_ms: float = 300.0) -> np.ndarray:
     """
     Gently lower leftover music bleed in the gaps between sung phrases of a
     separated lead (channels, samples). A voice converter turns that bleed into
     mumbles and false notes. Anything within `range_db` of the vocal's loud
     level passes untouched; quieter parts are expanded down by at most
-    `max_cut_db`. Opens fast and closes slowly, so word starts and tails stay.
+    `max_cut_db`. It stays fully open for `hold_ms` around any singing, so soft
+    word endings, breaths and consonants are never turned down: only the
+    middle of real pauses is.
     """
     from scipy.ndimage import maximum_filter1d, uniform_filter1d
     mono = np.mean(audio_cf, axis=0)
@@ -166,8 +168,9 @@ def gate_bleed_between_phrases(audio_cf: np.ndarray, sr: int, range_db: float = 
     loud_db = np.percentile(level_db, 95)
     threshold = loud_db - range_db
     gain_db = np.clip(level_db - threshold, -max_cut_db, 0.0)  # 1:2 expansion below threshold
-    gain_db = maximum_filter1d(gain_db, size=15)   # look ahead / hold: opens before a word starts
-    gain_db = uniform_filter1d(gain_db, size=60)   # ~60 ms smooth release, no chatter
+    hold = int(hold_ms) * 2 + 1                     # 1 block = 1 ms; open for hold_ms either side of singing
+    gain_db = maximum_filter1d(gain_db, size=hold)
+    gain_db = uniform_filter1d(gain_db, size=80)    # slow, smooth moves, no chatter
     gain = 10.0 ** (gain_db / 20.0)
     per_sample = np.interp(np.arange(audio_cf.shape[1]), np.arange(n_blocks) * hop + hop / 2.0, gain)
     return (audio_cf * per_sample[None, :]).astype(audio_cf.dtype)

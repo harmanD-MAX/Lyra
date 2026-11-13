@@ -22,6 +22,7 @@ logger = logging.getLogger("lyra_app")
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Request, Response
+from starlette.datastructures import UploadFile as StarletteUploadFile  # what form uploads arrive as
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -1270,7 +1271,8 @@ async def toggle_autotune(
             pass
     resp = await quick_remix(job_id=job_id, vocal_gain_db=vocal_gain_db, inst_gain_db=inst_gain_db,
                              reverb_amount=reverb_amount, echo_amount=echo_amount, warmth=0.55, clarity=0.85,
-                             center_anchor=1.0, presence_boost_db=2.8, apply_autotune=False, autotune_strength=0.0)
+                             center_anchor=1.0, presence_boost_db=2.8, apply_autotune=False, autotune_strength=0.0,
+                             master_reference_file=None, clear_master_reference=False)
 
     # The player's Solo vocal streams the MP3 preview, which a quick remix does not rebuild
     proc_wav = os.path.join(job_dir, "vocal_processed.wav")
@@ -1366,10 +1368,11 @@ async def quick_remix(
         raise HTTPException(status_code=404, detail="Vocal stem missing")
 
     # Optional: master to match a finished reference song (kept for later remixes)
+    # (quick_remix is also called directly from Python, so only real values count here)
     saved_ref = os.path.join(job_dir, audio_processor.MASTER_REFERENCE_NAME)
-    if clear_master_reference and os.path.exists(saved_ref):
+    if clear_master_reference is True and os.path.exists(saved_ref):
         os.remove(saved_ref)
-    if master_reference_file is not None:
+    if isinstance(master_reference_file, StarletteUploadFile):
         uploaded = _save_upload(master_reference_file, f"{job_id}_master_ref")
         await asyncio.to_thread(studio_pipeline.save_master_reference, uploaded, job_dir)
         try:

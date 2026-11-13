@@ -232,8 +232,11 @@ def clean_f0(f0: np.ndarray, fps: float = 100.0, smooth: float = 0.5) -> np.ndar
     filled = np.interp(idx, idx[voiced], midi[voiced])
     ref = median_filter(filled, size=max(5, int(0.15 * fps)) | 1, mode="nearest")
     dev = midi - ref
-    octave = voiced & (np.abs(dev) > 7.0)
-    midi[octave] -= 12.0 * np.round(dev[octave] / 12.0)
+    jump = 12.0 * np.round(dev / 12.0)
+    # a frame is an octave error only if moving it by whole octaves lands it on the melody;
+    # natural falls and slides at word endings (e.g. 8 semitones down) are left as sung
+    octave = voiced & (np.abs(jump) >= 12.0) & (np.abs(dev - jump) < 2.5)
+    midi[octave] -= jump[octave]
 
     # 4 + 5. Per sung phrase: remove short spikes, then smooth frame jitter
     spike_win = max(3, int(round(0.05 * fps)) | 1)

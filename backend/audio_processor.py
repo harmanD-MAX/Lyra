@@ -1407,7 +1407,10 @@ def master_and_remaster_track(
 
     # Export studio-polished solo vocal stem
     vocal_processed_path = os.path.join(output_dir, "vocal_processed.wav")
-    sf.write(vocal_processed_path, vocal, target_sr, subtype="PCM_24")
+    stem_peak = float(np.max(np.abs(vocal))) if vocal.size else 0.0
+    # The mix stays float (the master limiter handles peaks); the saved stem is scaled, never clipped
+    sf.write(vocal_processed_path, vocal * (0.98 / stem_peak) if stem_peak > 0.98 else vocal,
+             target_sr, subtype="PCM_24")
 
     # Process instrumental (reduce music level and apply dynamic Mid/Side pocket)
     if inst is not None:
