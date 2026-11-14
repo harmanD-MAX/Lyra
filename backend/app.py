@@ -1707,6 +1707,7 @@ def _reel_public(meta: dict) -> dict:
     rid = meta.get("id")
     out = {k: meta.get(k) for k in ("id", "job_id", "status", "message", "width", "height", "fps", "duration",
                                      "has_audio", "title", "uploader", "source_url")}
+    out["audios"] = meta.get("audios") or []
     ready = meta.get("status") == "ready"
     out["preview_url"] = f"/api/reels/{rid}/media/preview" if ready else ""
     out["filmstrip_url"] = f"/api/reels/{rid}/media/filmstrip" if ready else ""
@@ -1776,6 +1777,45 @@ async def get_reel_song(job_id: str, track: str):
     return await asyncio.to_thread(reel_studio.song_peaks, path)
 
 
+@app.post("/api/reels/{reel_id}/audio")
+async def add_reel_audio(reel_id: str, request: Request, audio_file: UploadFile = File(...)):
+    """Add your own audio file (any song, voice-over or sound effect, or a video's sound) to a reel."""
+    _require_user(request)
+    rdir = _reel_dir_or_404(reel_id)
+    os.makedirs(os.path.join(rdir, "audio"), exist_ok=True)
+    tmp = os.path.join(rdir, "audio", "_upload_" + re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(audio_file.filename or "audio")))
+    with open(tmp, "wb") as f:
+        shutil.copyfileobj(audio_file.file, f)
+    try:
+        entry = await asyncio.to_thread(reel_studio.add_audio, rdir, tmp, audio_file.filename or "Audio")
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return entry
+
+
+@app.api_route("/api/reels/{reel_id}/audio/{audio_id}", methods=["GET", "HEAD"])
+async def get_reel_audio(reel_id: str, audio_id: str, request: Request):
+    """Preview copy (MP3) of an audio file added to a reel."""
+    p = reel_studio.audio_file(_reel_dir_or_404(reel_id), audio_id, for_render=False)
+    if not p:
+        raise HTTPException(status_code=404, detail="Audio not found")
+    return stream_audio_file(p, request, "audio/mpeg")
+
+
+@app.get("/api/reels/{reel_id}/audio/{audio_id}/peaks")
+async def get_reel_audio_peaks(reel_id: str, audio_id: str):
+    p = reel_studio.audio_file(_reel_dir_or_404(reel_id), audio_id, for_render=True)
+    if not p:
+        raise HTTPException(status_code=404, detail="Audio not found")
+    return await asyncio.to_thread(reel_studio.song_peaks, p)
+
+
+@app.delete("/api/reels/{reel_id}/audio/{audio_id}")
+async def delete_reel_audio(reel_id: str, audio_id: str, request: Request):
+    _require_user(request)
+    return {"removed": reel_studio.remove_audio(_reel_dir_or_404(reel_id), audio_id)}
+
+
 @app.post("/api/reels/{reel_id}/render")
 async def render_reel(reel_id: str, request: Request):
     """Render the editor project (JSON body) to an MP4 in the background."""
@@ -1790,6 +1830,11 @@ async def render_reel(reel_id: str, request: Request):
         raise HTTPException(status_code=400, detail="Send the project as JSON.")
     job_id = body.get("job_id") or meta.get("job_id")
     song_paths, song_durs = {}, {}
+    for track in {s.get("track") for s in (body.get("songs") or [])}:
+        p = reel_studio.audio_file(rdir, track or "", for_render=True)  # your own audio files
+        if p:
+            song_paths[track] = p
+            song_durs[track] = reel_studio.probe_audio_duration(p)
     if job_id:
         job_dir = _find_job_dir(job_id, job_manager.get_job(job_id))
         for track in {s.get("track") for s in (body.get("songs") or [])}:

@@ -47,6 +47,9 @@ MAX_TEXTS = 20
 MAX_CLIPS = 60
 MAX_IMPORT_SECONDS = 15 * 60
 REEL_ID_RE = re.compile(r"^[a-f0-9]{12}$")
+AUDIO_ID_RE = re.compile(r"^ext_[a-f0-9]{8}$")   # your own audio files added to a reel
+MAX_AUDIO_SECONDS = 30 * 60
+MAX_AUDIOS = 20
 
 _LOCK = threading.Lock()
 _RENDERS: Dict[str, subprocess.Popen] = {}
@@ -266,6 +269,65 @@ def probe_audio_duration(path: str) -> float:
         return 0.0
 
 
+def add_audio(rdir: str, upload_path: str, name: str) -> dict:
+    """
+    Add your own audio file (another song, a voice-over, a sound effect...) to a reel.
+    Kept as a lossless WAV for export and a small MP3 for the editor preview.
+    Any format ffmpeg reads works, including the audio track of a video file.
+    """
+    adir = os.path.join(rdir, "audio")
+    os.makedirs(adir, exist_ok=True)
+    meta = read_meta(rdir)
+    if len(meta.get("audios") or []) >= MAX_AUDIOS:
+        raise RuntimeError(f"A reel can hold up to {MAX_AUDIOS} audio files")
+    aid = "ext_" + uuid.uuid4().hex[:8]
+    wav, mp3 = os.path.join(adir, aid + ".wav"), os.path.join(adir, aid + ".mp3")
+    try:
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", upload_path, "-vn", "-map", "0:a:0",
+                        "-ac", "2", "-ar", "44100", "-t", str(MAX_AUDIO_SECONDS), wav], capture_output=True, check=True)
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", wav, "-b:a", "192k", mp3], capture_output=True, check=True)
+    except subprocess.CalledProcessError:
+        for p in (wav, mp3):
+            if os.path.exists(p):
+                os.remove(p)
+        raise RuntimeError("That file has no audio Lyra can read")
+    finally:
+        if os.path.exists(upload_path):
+            os.remove(upload_path)
+    duration = probe_audio_duration(wav)
+    if duration < 0.2:
+        for p in (wav, mp3):
+            os.remove(p)
+        raise RuntimeError("That audio file is empty")
+    clean = re.sub(r"\s+", " ", os.path.splitext(os.path.basename(name or "Audio"))[0]).strip()[:60] or "Audio"
+    entry = {"id": aid, "name": clean, "duration": round(duration, 3)}
+    meta = read_meta(rdir)
+    update_meta(rdir, audios=(meta.get("audios") or []) + [entry])
+    return entry
+
+
+def audio_file(rdir: str, aid: str, for_render: bool = True) -> Optional[str]:
+    if not AUDIO_ID_RE.match(aid or ""):
+        return None
+    if not any(a.get("id") == aid for a in read_meta(rdir).get("audios") or []):
+        return None
+    p = os.path.join(rdir, "audio", aid + (".wav" if for_render else ".mp3"))
+    return p if os.path.exists(p) else None
+
+
+def remove_audio(rdir: str, aid: str) -> bool:
+    meta = read_meta(rdir)
+    audios = meta.get("audios") or []
+    if not any(a.get("id") == aid for a in audios) or not AUDIO_ID_RE.match(aid):
+        return False
+    for ext in (".wav", ".mp3"):
+        p = os.path.join(rdir, "audio", aid + ext)
+        if os.path.exists(p):
+            os.remove(p)
+    update_meta(rdir, audios=[a for a in audios if a.get("id") != aid])
+    return True
+
+
 def song_peaks(path: str, per_second: int = 50) -> dict:
     """Waveform peaks (0..1) for the editor timeline, decoded with ffmpeg to 8 kHz mono."""
     sr = 8000
@@ -316,8 +378,8 @@ def normalize_project(project: dict, video_duration: float, song_durations: Dict
 
     songs = []
     for s in (project.get("songs") or [])[:MAX_CLIPS]:
-        track = s.get("track") if s.get("track") in SONG_TRACKS else "master"
-        sd = song_durations.get(track)
+        track = s.get("track") or "master"
+        sd = song_durations.get(track)  # only tracks the server could find (song tracks or your audio files)
         if not sd:
             continue
         a = _f(s.get("in"), 0.0, 0.0, sd)

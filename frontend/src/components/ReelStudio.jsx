@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   X, Upload, Link as LinkIcon, Play, Pause, Scissors, Trash2, Undo2, Redo2, ZoomIn, ZoomOut,
   Music, Film, Type, Crop, Palette, Download, Share2, Wand2, Volume2, VolumeX, Plus, Clapperboard,
-  Copy, Check, SkipBack, Magnet, AlertCircle, Loader2,
+  Copy, Check, SkipBack, Magnet, AlertCircle, Loader2, FileAudio,
 } from 'lucide-react';
 
 /*
@@ -268,6 +268,18 @@ export default function ReelStudio({ open, onClose, job }) {
   const rafRef = useRef(0);
 
   const duration = reel?.duration || 0;
+  const [addingAudio, setAddingAudio] = useState(false);
+  const peaksRequested = useRef(new Set());
+  const [audioError, setAudioError] = useState('');
+  const audios = reel?.audios || [];
+  const allTracks = useMemo(() => [
+    ...TRACKS,
+    ...audios.map((a) => ({ id: a.id, label: a.name, hint: 'Your audio file', ext: true })),
+  ], [audios]);
+  const trackLabel = (id) => allTracks.find((t) => t.id === id)?.label || 'Audio';
+  const trackUrl = useCallback((track) => (track.startsWith('ext_')
+    ? `/api/reels/${reel?.id}/audio/${track}`
+    : TRACK_AUDIO[track](jobId)), [reel?.id, jobId]);
   const clips = project?.clips || [];
   const starts = useMemo(() => clipStarts(clips), [clips]);
   const L = useMemo(() => reelLength(clips), [clips]);
@@ -331,13 +343,26 @@ export default function ReelStudio({ open, onClose, job }) {
         const AC = window.AudioContext || window.webkitAudioContext;
         audioCtxRef.current = new AC();
       }
-      fetch(`${TRACK_AUDIO[track](jobId)}?t=${Date.now()}`)
+      fetch(`${trackUrl(track)}?t=${Date.now()}`)
         .then((r) => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
         .then((buf) => audioCtxRef.current.decodeAudioData(buf))
         .then((ab) => { buffersRef.current[track] = ab; setBuffersReady((b) => ({ ...b, [track]: true })); })
         .catch(() => setBuffersReady((b) => ({ ...b, [track]: 'error' })));
     });
-  }, [open, jobId, project, buffersReady]);
+  }, [open, jobId, project, buffersReady, trackUrl]);
+
+  // waveforms of your own audio files
+  useEffect(() => {
+    if (!open || !reel?.id) return;
+    audios.filter((a) => !songs[a.id] && !peaksRequested.current.has(a.id)).forEach((a) => {
+      peaksRequested.current.add(a.id);
+      setSongs((s) => ({ ...s, [a.id]: { loading: true, duration: a.duration } }));
+      fetch(`/api/reels/${reel.id}/audio/${a.id}/peaks`)
+        .then((r) => (r.ok ? r.json() : { missing: true }))
+        .then((d) => setSongs((s) => ({ ...s, [a.id]: d })))
+        .catch(() => setSongs((s) => ({ ...s, [a.id]: { missing: true } })));
+    });
+  }, [open, reel?.id, audios, songs]);
 
   // ------------------------------------------------------------------
   // import
@@ -644,6 +669,46 @@ export default function ReelStudio({ open, onClose, job }) {
     const s = { id: uid(), track, in: 0, out: dur, at, volume: 1, fade_in: 0.2, fade_out: 0.5 };
     change((q) => ({ ...q, songs: [...q.songs, s] }));
     setSelected({ kind: 'song', id: s.id });
+  };
+
+  const placePiece = (track, sd) => {
+    const p = projectRef.current;
+    const len = reelLength(p.clips);
+    const at = clamp(timeRef.current >= len - 0.5 ? 0 : timeRef.current, 0, Math.max(0, len - 0.5));
+    const dur = Math.min(sd, Math.max(1, len - at));
+    const s = { id: uid(), track, in: 0, out: dur, at, volume: 1, fade_in: 0.2, fade_out: 0.5 };
+    change((q) => ({ ...q, songs: [...q.songs, s] }));
+    setSelected({ kind: 'song', id: s.id });
+  };
+
+  /** Add your own audio file to the reel and put it on the timeline at the playhead. */
+  const uploadAudio = async (file) => {
+    if (!file || !reel?.id) return;
+    setAddingAudio(true);
+    setAudioError('');
+    try {
+      const fd = new FormData();
+      fd.append('audio_file', file);
+      const res = await fetch(`/api/reels/${reel.id}/audio`, { method: 'POST', body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || 'Could not add this audio');
+      setReel((r) => ({ ...r, audios: [...(r.audios || []), data] }));
+      placePiece(data.id, data.duration);
+    } catch (e) {
+      setAudioError(e.message);
+    } finally {
+      setAddingAudio(false);
+    }
+  };
+
+  const removeAudio = async (aid) => {
+    if (!reel?.id) return;
+    const res = await fetch(`/api/reels/${reel.id}/audio/${aid}`, { method: 'DELETE' }).catch(() => null);
+    if (!res?.ok) return;
+    setReel((r) => ({ ...r, audios: (r.audios || []).filter((a) => a.id !== aid) }));
+    change((q) => ({ ...q, songs: q.songs.filter((s) => s.track !== aid) }));
+    delete buffersRef.current[aid];
+    setSelected(null);
   };
 
   const addText = () => {
@@ -1102,7 +1167,7 @@ export default function ReelStudio({ open, onClose, job }) {
                     >
                       {peaks?.peaks && <Waveform peaks={peaks.peaks} perSecond={peaks.per_second} from={s.in} to={s.out} width={w} height={LANE_H.song - 4} color="rgba(63,224,197,0.75)" />}
                       <div className="absolute left-1 top-0.5 text-[10px] text-white/80 pointer-events-none truncate max-w-full">
-                        <Music className="inline w-3 h-3 mr-0.5" />{TRACKS.find((t) => t.id === s.track)?.label} · {fmt(s.in)}–{fmt(s.out)}
+                        <Music className="inline w-3 h-3 mr-0.5" />{trackLabel(s.track)} · {fmt(s.in)}–{fmt(s.out)}
                       </div>
                       <div onPointerDown={(e) => dragSong(e, s, 'in')} className="absolute left-0 top-0 h-full w-2.5 cursor-ew-resize bg-[#3fe0c5]/60 hover:bg-[#3fe0c5]" title="Trim start" />
                       <div onPointerDown={(e) => dragSong(e, s, 'out')} className="absolute right-0 top-0 h-full w-2.5 cursor-ew-resize bg-[#3fe0c5]/60 hover:bg-[#3fe0c5]" title="Trim end" />
@@ -1177,16 +1242,37 @@ export default function ReelStudio({ open, onClose, job }) {
 
                 <section className="space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-semibold text-white/80">Your song</h4>
-                    <button type="button" className="btn btn-outline-teal btn-sm" onClick={() => addSong(selSong?.track || 'master')} disabled={!songs.master?.duration}><Plus /> Add</button>
+                    <h4 className="text-xs font-semibold text-white/80">Music &amp; audio</h4>
+                    <div className="flex gap-1.5">
+                      <button type="button" className="btn btn-outline-teal btn-sm" onClick={() => addSong(selSong?.track || 'master')} disabled={!songs.master?.duration} title="Add another piece of your converted song"><Plus /> Song</button>
+                      <label className={`btn btn-outline-gold btn-sm cursor-pointer ${addingAudio ? 'opacity-60 pointer-events-none' : ''}`} title="Add any audio file: another song, a voice-over, a sound effect, or a video's sound">
+                        {addingAudio ? <Loader2 className="animate-spin" /> : <FileAudio />} Audio file
+                        <input type="file" accept="audio/*,video/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; uploadAudio(f); }} />
+                      </label>
+                    </div>
                   </div>
+                  {audioError && <p className="text-[11px] text-rose-300">{audioError}</p>}
+                  {audios.length > 0 && !selSong && (
+                    <div className="space-y-1">
+                      <div className="text-[11px] text-white/45">Your audio files</div>
+                      {audios.map((a) => (
+                        <div key={a.id} className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs">
+                          <FileAudio className="w-3.5 h-3.5 text-[#e5a958] shrink-0" />
+                          <span className="truncate flex-1">{a.name}</span>
+                          <span className="font-mono text-white/40">{fmt(a.duration)}</span>
+                          <button type="button" className="text-white/50 hover:text-white" title="Add to the timeline at the playhead" onClick={() => placePiece(a.id, a.duration)}><Plus className="w-3.5 h-3.5" /></button>
+                          <button type="button" className="text-white/40 hover:text-rose-300" title="Remove this file from the reel" onClick={() => removeAudio(a.id)}><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {songs.master?.missing && <p className="text-[11px] text-rose-300">The song's audio isn't on the server anymore.</p>}
                   {!selSong && project.songs.length > 0 && (
                     <div className="space-y-1.5">
                       {project.songs.map((s, i) => (
                         <button key={s.id} type="button" onClick={() => setSelected({ kind: 'song', id: s.id })}
                           className="w-full text-left rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] px-3 py-2 text-xs">
-                          <Music className="inline w-3.5 h-3.5 mr-1 text-[#3fe0c5]" /> Piece {i + 1}: {TRACKS.find((t) => t.id === s.track)?.label}, {fmt(s.in)}–{fmt(s.out)} at {fmt(s.at)}
+                          <Music className="inline w-3.5 h-3.5 mr-1 text-[#3fe0c5]" /> Piece {i + 1}: {trackLabel(s.track)}, {fmt(s.in)}–{fmt(s.out)} at {fmt(s.at)}
                         </button>
                       ))}
                       <p className="text-[11px] text-white/40">Select a piece on the timeline to edit it. Drag it to move, drag its edges to trim, press S to split.</p>
@@ -1198,14 +1284,14 @@ export default function ReelStudio({ open, onClose, job }) {
                     return (
                       <div className="space-y-3 rounded-xl border border-[#3fe0c5]/25 bg-[#3fe0c5]/[0.04] p-3">
                         <Seg small value={selSong.track}
-                          options={TRACKS.map((t) => ({ ...t, label: songs[t.id]?.missing ? `${t.label} ✕` : t.label }))}
+                          options={allTracks.map((t) => ({ ...t, label: songs[t.id]?.missing ? `${t.label} ✕` : t.label }))}
                           onChange={(track) => {
                             if (!songs[track]?.duration) return;
                             const d2 = songs[track].duration;
                             const a = Math.min(selSong.in, Math.max(0, d2 - MIN_CLIP));
                             updateSong(selSong.id, { track, in: a, out: Math.min(d2, a + dur) });
                           }} />
-                        <Slider label="Part of the song" value={selSong.in} min={0} max={Math.max(0, sd - dur)} step={0.1} color={TEAL}
+                        <Slider label={selSong.track.startsWith('ext_') ? 'Part of the audio' : 'Part of the song'} value={selSong.in} min={0} max={Math.max(0, sd - dur)} step={0.1} color={TEAL}
                           display={(v) => `${fmt(v)} – ${fmt(v + dur)}`}
                           onStart={checkpoint} onChange={(v) => updateSong(selSong.id, { in: v, out: v + dur }, false)} />
                         <div className="flex flex-wrap gap-1.5">
