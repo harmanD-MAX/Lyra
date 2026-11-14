@@ -8,10 +8,11 @@ import {
   Sliders, CheckCircle2, AlertCircle,
   ChevronDown, ChevronUp, Disc, Loader2, X, RefreshCw,
   PlusCircle, Trash2, Check, Cloud, Headphones,
-  Cpu, HardDrive, Layers, FileAudio, Square, User, Zap, Waves, Menu, LogOut
+  Cpu, HardDrive, Layers, FileAudio, Square, User, Zap, Waves, Menu, LogOut, Clapperboard
 } from 'lucide-react';
 import ProcessingStatus from './ProcessingStatus';
 import ComposerTools from './ComposerTools';
+import ReelStudio from './ReelStudio';
 import VoiceRing from './VoiceRing';
 import { decodeTrack, createAnalyser } from './audio/spectrum';
 
@@ -189,6 +190,10 @@ export default function StudioView({
   onRefreshJobs = () => {},
 }) {
   const [showComposerTools, setShowComposerTools] = useState(false);
+  const [showReelStudio, setShowReelStudio] = useState(false);
+  // Optional reference mastering: master to sound like a finished song the user picks
+  const [referenceSong, setReferenceSong] = useState(null);
+  const [clearReference, setClearReference] = useState(false);
   const [storage, setStorage] = useState(null);
   const [cleaning, setCleaning] = useState(false);
   useEffect(() => {
@@ -961,12 +966,16 @@ export default function StudioView({
       fd.append('inst_gain_db', iGain);
       fd.append('reverb_amount', hReverb);
       fd.append('echo_amount', sDepth);
+      if (referenceSong) fd.append('master_reference_file', referenceSong);
+      if (clearReference) fd.append('clear_master_reference', true);
 
       const res = await fetch('/api/remix', {
         method: 'POST',
         body: fd
       });
       if (res.ok) {
+        setReferenceSong(null); // kept on the server for later remixes
+        setClearReference(false);
         const wasPlay = isPlaying;
         const exactTime = currentTime;
         const newCb = Date.now().toString();
@@ -1737,14 +1746,41 @@ export default function StudioView({
                           </label>
                         ))}
                       </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/[0.06] text-[11px]">
+                        <span className="text-white/55">Match a reference song <span className="text-white/35">(optional: master to sound like a finished song)</span></span>
+                        <div className="flex items-center gap-1.5">
+                          <label className="btn btn-secondary btn-sm cursor-pointer max-w-[200px]" title="Pick a finished song; Apply masters your mix to its loudness and tone">
+                            <Upload /> <span className="truncate">{referenceSong ? referenceSong.name : 'Choose song'}</span>
+                            <input type="file" accept="audio/*" className="hidden" onChange={(e) => { setReferenceSong(e.target.files?.[0] || null); setClearReference(false); }} />
+                          </label>
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setReferenceSong(null); setClearReference(true); }}>
+                            {clearReference ? 'Removed on Apply' : 'Remove'}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   )}
 
                   {/* Export bar */}
                   <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-white/[0.06] flex-shrink-0">
-                    <button type="button" onClick={() => setShowComposerTools(true)} className="btn btn-outline-teal btn-sm" title="Stems, MIDI, key/BPM and section re-render">
-                      <Layers /> Stems · MIDI · Re-render
-                    </button>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button type="button" onClick={() => setShowComposerTools(true)} className="btn btn-outline-teal btn-sm" title="Stems, MIDI, key/BPM and section re-render">
+                        <Layers /> Stems · MIDI · Re-render
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          Object.values(stemAudiosRef.current || {}).forEach((el) => { try { el?.pause(); } catch (e) { } });
+                          setIsPlaying(false);
+                          setShowReelStudio(true);
+                        }}
+                        className="btn btn-outline-gold btn-sm"
+                        title="Put this song on an Instagram reel or any video, then edit and export"
+                      >
+                        <Clapperboard /> Create reel
+                      </button>
+                    </div>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {currentResults.saved_to_cloud ? (
                         <span className="chip chip-green !h-8 !px-3" title="The Master 3D mix is saved in cloud storage">
@@ -2293,6 +2329,12 @@ export default function StudioView({
           </div>
         </div>
       )}
+
+      <ReelStudio
+        open={showReelStudio}
+        onClose={() => setShowReelStudio(false)}
+        job={currentJob}
+      />
 
       <ComposerTools
         open={showComposerTools}

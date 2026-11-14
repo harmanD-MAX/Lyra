@@ -27,9 +27,6 @@ export default function StudioPlayer({ jobResults, jobId }) {
     Boolean(jobResults?.settings?.echo_amount > 0.02 || jobResults?.settings?.reverb_amount > 0.02)
   );
   const [remixMsg, setRemixMsg] = useState('');
-  // Optional reference mastering: match the sound of a finished song the user picks
-  const [referenceSong, setReferenceSong] = useState(null);
-  const [clearReference, setClearReference] = useState(false);
   const [cacheBuster, setCacheBuster] = useState('');
   const [isPanelExpanded, setIsPanelExpanded] = useState(true);
 
@@ -98,8 +95,6 @@ export default function StudioPlayer({ jobResults, jobId }) {
       formData.append('clarity', 0.85);
       formData.append('apply_autotune', true);
       formData.append('autotune_strength', 0.50);
-      if (referenceSong && !isCleanRevert) formData.append('master_reference_file', referenceSong);
-      if (clearReference) formData.append('clear_master_reference', true);
 
       const res = await fetch('/api/remix', {
         method: 'POST',
@@ -110,8 +105,6 @@ export default function StudioPlayer({ jobResults, jobId }) {
 
       const newBuster = Date.now().toString();
       setCacheBuster(newBuster);
-      if (!isCleanRevert) setReferenceSong(null); // saved with the song for later remasters
-      setClearReference(false);
       setIsRemastered(!isCleanRevert);
       setRemixMsg(!isCleanRevert ? 'Custom master applied! Playing remastered mix.' : 'Clean mix restored!');
       setTimeout(() => setRemixMsg(''), 5000);
@@ -793,32 +786,6 @@ export default function StudioPlayer({ jobResults, jobId }) {
               </div>
             </div>
           )}
-
-          {/* Optional reference mastering */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-3 border-t border-[#202020] text-xs text-[#999]">
-            <div>
-              <span className="font-semibold text-[#ccc]">Match a reference song (optional)</span>
-              <span className="block text-[#666]">Master to the loudness and tone of a finished song you love.</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="px-3 py-2 rounded-lg bg-[#202020] hover:bg-[#282828] border border-[#333] text-[#ccc] cursor-pointer truncate max-w-[220px]">
-                {referenceSong ? referenceSong.name : 'Choose song...'}
-                <input
-                  type="file"
-                  accept="audio/*"
-                  className="hidden"
-                  onChange={(e) => { setReferenceSong(e.target.files?.[0] || null); setClearReference(false); }}
-                />
-              </label>
-              <button
-                type="button"
-                onClick={() => { setReferenceSong(null); setClearReference(true); }}
-                className="px-3 py-2 rounded-lg text-[#777] hover:text-[#ccc] cursor-pointer"
-              >
-                {clearReference ? 'Removed on next remaster' : 'Remove'}
-              </button>
-            </div>
-          </div>
 
           {/* Action Buttons Row */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-[#202020]">

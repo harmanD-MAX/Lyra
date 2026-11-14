@@ -37,6 +37,7 @@ import resources
 import separation
 import studio_pipeline
 import voices
+import reel_studio
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
@@ -1686,6 +1687,129 @@ async def get_system_info():
         "demucs_ready": True,
         "autotune_ready": True
     }
+
+
+# ---------------------------------------------------------------------------
+# Reel Studio: put a converted song on a video and export a reel
+# ---------------------------------------------------------------------------
+
+def _reel_dir_or_404(reel_id: str) -> str:
+    try:
+        rdir = reel_studio.reel_dir(OUTPUTS_DIR, reel_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Reel not found")
+    if not os.path.isdir(rdir):
+        raise HTTPException(status_code=404, detail="Reel not found")
+    return rdir
+
+
+def _reel_public(meta: dict) -> dict:
+    rid = meta.get("id")
+    out = {k: meta.get(k) for k in ("id", "job_id", "status", "message", "width", "height", "fps", "duration",
+                                     "has_audio", "title", "uploader", "source_url")}
+    ready = meta.get("status") == "ready"
+    out["preview_url"] = f"/api/reels/{rid}/media/preview" if ready else ""
+    out["filmstrip_url"] = f"/api/reels/{rid}/media/filmstrip" if ready else ""
+    render = dict(meta.get("render") or {"status": "idle"})
+    if render.get("status") == "done":
+        stamp = int(render.get("finished_at", 0))
+        render["url"] = f"/api/reels/{rid}/media/export?t={stamp}"
+        render["download_url"] = f"/api/reels/{rid}/media/export?download=true&t={stamp}"
+    out["render"] = render
+    return out
+
+
+@app.post("/api/reels")
+async def create_reel(
+    request: Request,
+    url: Optional[str] = Form(None),
+    video_file: Optional[UploadFile] = File(None),
+    job_id: Optional[str] = Form(None),
+):
+    """Start importing a video for a reel: an Instagram post / reel link (or any yt-dlp link) or an upload."""
+    _require_user(request)
+    url = (url or "").strip()
+    if not url and not isinstance(video_file, StarletteUploadFile):
+        raise HTTPException(status_code=400, detail="Paste a video link or upload a video.")
+    if url and not re.match(r"^https?://", url):
+        raise HTTPException(status_code=400, detail="That doesn't look like a link.")
+    reel_id, rdir = reel_studio.new_reel(OUTPUTS_DIR, job_id)
+    upload_path = None
+    if isinstance(video_file, StarletteUploadFile):
+        upload_path = os.path.join(rdir, "_upload_" + os.path.basename(video_file.filename or "video.mp4").replace(" ", "_"))
+        with open(upload_path, "wb") as f:
+            shutil.copyfileobj(video_file.file, f)
+    threading.Thread(target=reel_studio.import_video, args=(rdir,),
+                     kwargs={"url": url or None, "upload_path": upload_path}, daemon=True).start()
+    return _reel_public(reel_studio.read_meta(rdir))
+
+
+@app.get("/api/reels/{reel_id}")
+async def get_reel(reel_id: str):
+    return _reel_public(reel_studio.read_meta(_reel_dir_or_404(reel_id)))
+
+
+@app.api_route("/api/reels/{reel_id}/media/{kind}", methods=["GET", "HEAD"])
+async def get_reel_media(reel_id: str, kind: str, request: Request, download: bool = False):
+    rdir = _reel_dir_or_404(reel_id)
+    meta = reel_studio.read_meta(rdir)
+    if kind == "preview" and meta.get("preview"):
+        return stream_audio_file(os.path.join(rdir, meta["preview"]), request, "video/mp4")
+    if kind == "filmstrip" and os.path.exists(os.path.join(rdir, "filmstrip.jpg")):
+        return FileResponse(os.path.join(rdir, "filmstrip.jpg"), media_type="image/jpeg")
+    if kind == "export" and os.path.exists(os.path.join(rdir, "reel.mp4")):
+        title = re.sub(r"[^A-Za-z0-9 _-]+", "", meta.get("title") or "")[:40].strip() or reel_id
+        return stream_audio_file(os.path.join(rdir, "reel.mp4"), request, "video/mp4",
+                                 download=download, download_filename=f"Lyra Reel - {title}.mp4")
+    raise HTTPException(status_code=404, detail="Not found")
+
+
+@app.get("/api/reels/song/{job_id}/{track}")
+async def get_reel_song(job_id: str, track: str):
+    """Waveform peaks and length of a song track, for the reel timeline."""
+    if track not in reel_studio.SONG_TRACKS:
+        raise HTTPException(status_code=404, detail="Unknown track")
+    job = job_manager.get_job(job_id)
+    path = reel_studio.song_file(_find_job_dir(job_id, job), track, for_render=False)
+    if not path:
+        raise HTTPException(status_code=404, detail="This track is not available for this song")
+    return await asyncio.to_thread(reel_studio.song_peaks, path)
+
+
+@app.post("/api/reels/{reel_id}/render")
+async def render_reel(reel_id: str, request: Request):
+    """Render the editor project (JSON body) to an MP4 in the background."""
+    _require_user(request)
+    rdir = _reel_dir_or_404(reel_id)
+    meta = reel_studio.read_meta(rdir)
+    if meta.get("status") != "ready":
+        raise HTTPException(status_code=400, detail="The video is still being prepared.")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Send the project as JSON.")
+    job_id = body.get("job_id") or meta.get("job_id")
+    song_paths, song_durs = {}, {}
+    if job_id:
+        job_dir = _find_job_dir(job_id, job_manager.get_job(job_id))
+        for track in {s.get("track") for s in (body.get("songs") or [])}:
+            if track in reel_studio.SONG_TRACKS:
+                p = reel_studio.song_file(job_dir, track, for_render=True)
+                if p:
+                    song_paths[track] = p
+                    song_durs[track] = reel_studio.probe_audio_duration(p)
+    project = reel_studio.normalize_project(body, meta.get("duration") or 0.0, song_durs)
+    try:
+        status = reel_studio.start_render(rdir, project, song_paths)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"render": status, "length": project["length"]}
+
+
+@app.post("/api/reels/{reel_id}/render/cancel")
+async def cancel_reel_render(reel_id: str, request: Request):
+    _require_user(request)
+    return {"cancelled": reel_studio.cancel_render(_reel_dir_or_404(reel_id))}
 
 
 # Serve the built frontend (npm run build) from the same process, so a small

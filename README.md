@@ -41,6 +41,11 @@ In a notebook with GPU T4 enabled:
 - **Pitch Correction**: Natural autotune and timing correction.
 - **Stem Separation**: Automatically split vocals, instrumental, and backing tracks.
 - **Cloud & Local Storage**: Save songs locally, to Google Drive, or sync with Cloudflare R2.
+- **Reel Studio**: Put a converted song on an Instagram reel / post (or any uploaded video), then trim, split and move video and song pieces, mute the original sound, frame for 9:16 / 4:5 / 1:1, colour, add text, and export an MP4 ready to post.
+
+### Instagram links
+
+Public posts and reels import directly. Instagram sometimes asks for a login, especially from cloud servers. Then either upload the video file instead, or export your Instagram cookies to a `cookies.txt` file (with a browser extension like "Get cookies.txt") and set `INSTAGRAM_COOKIES_PATH=/path/to/cookies.txt` in `backend/.env`.
 
 ## Architecture
 
