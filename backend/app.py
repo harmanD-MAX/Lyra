@@ -38,6 +38,7 @@ import separation
 import studio_pipeline
 import voices
 import reel_studio
+import helper_bridge
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
@@ -1687,6 +1688,108 @@ async def get_system_info():
         "demucs_ready": True,
         "autotune_ready": True
     }
+
+
+# ---------------------------------------------------------------------------
+# Download helper: links download on the user's computer (YouTube blocks cloud servers)
+# ---------------------------------------------------------------------------
+
+def _helper_auth(request: Request):
+    auth_header = request.headers.get("authorization", "")
+    token = auth_header[7:] if auth_header.lower().startswith("bearer ") else ""
+    if not helper_bridge.BRIDGE.check(token):
+        raise HTTPException(status_code=401, detail="Unknown helper key")
+
+
+def _helper_info(request: Request) -> dict:
+    h = request.headers
+    return {"name": h.get("x-helper-name"), "version": h.get("x-helper-version"),
+            "platform": h.get("x-helper-platform"), "js": h.get("x-helper-js")}
+
+
+def _public_base_url(request: Request) -> str:
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    if not request.headers.get("x-forwarded-proto") and not host.startswith(("localhost", "127.0.0.1")):
+        proto = "https"  # tunnels (localtunnel, cloudflare) serve https
+    return f"{proto}://{host.split(',')[0].strip()}"
+
+
+@app.get("/api/helper/status")
+async def helper_status(request: Request):
+    _require_user(request)
+    return helper_bridge.BRIDGE.status()
+
+
+@app.get("/api/helper/download")
+async def helper_download(request: Request):
+    """The helper for the user's computer, preset with this server's address and key."""
+    _require_user(request)
+    data = helper_bridge.BRIDGE.package(_public_base_url(request))
+    return Response(content=data, media_type="application/zip",
+                    headers={"Content-Disposition": 'attachment; filename="Lyra Helper.zip"',
+                             "Cache-Control": "no-store"})
+
+
+@app.post("/api/helper/reset")
+async def helper_reset(request: Request):
+    """New key: helpers downloaded before stop working (use if config.json was shared)."""
+    _require_user(request)
+    helper_bridge.BRIDGE.reset_token()
+    return helper_bridge.BRIDGE.status()
+
+
+@app.get("/api/helper/poll")
+async def helper_poll(request: Request, wait: float = 25.0):
+    _helper_auth(request)
+    task = await asyncio.to_thread(helper_bridge.BRIDGE.poll, wait, _helper_info(request))
+    return {"task": task}
+
+
+@app.post("/api/helper/tasks/{task_id}/progress")
+async def helper_task_progress(task_id: str, request: Request):
+    _helper_auth(request)
+    body = await request.json()
+    try:
+        helper_bridge.BRIDGE.progress(task_id, body.get("message") or "", body.get("pct"))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Unknown task")
+    return {"ok": True}
+
+
+@app.post("/api/helper/tasks/{task_id}/error")
+async def helper_task_error(task_id: str, request: Request):
+    _helper_auth(request)
+    body = await request.json()
+    try:
+        helper_bridge.BRIDGE.fail(task_id, body.get("message") or "Download failed on your computer")
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Unknown task")
+    return {"ok": True}
+
+
+@app.post("/api/helper/tasks/{task_id}/result")
+async def helper_task_result(task_id: str, request: Request, file: UploadFile = File(...), meta: str = Form("{}")):
+    _helper_auth(request)
+    try:
+        save_dir = helper_bridge.BRIDGE.save_dir(task_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Unknown task")
+    os.makedirs(save_dir, exist_ok=True)
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    ext = ext if re.match(r"^\.[a-z0-9]{2,5}$", ext) else ".bin"
+    dest = os.path.join(save_dir, f"helper_download{ext}")
+    with open(dest, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    try:
+        info = json.loads(meta or "{}")
+    except Exception:
+        info = {}
+    try:
+        helper_bridge.BRIDGE.finish(task_id, dest, info if isinstance(info, dict) else {})
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Unknown task")
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

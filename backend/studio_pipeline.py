@@ -86,14 +86,48 @@ class JobParams:
 # helpers
 # ---------------------------------------------------------------------------
 
+def download_link(kind: str, url: str, work_dir: str, progress: Callable) -> dict:
+    """
+    Get a song from a Spotify or YouTube link. When the Lyra download helper runs on
+    the user's computer, it downloads there (YouTube blocks cloud servers, not homes);
+    otherwise the server downloads it itself.
+    """
+    import helper_bridge
+    if not helper_bridge.BRIDGE.is_online():
+        if kind == "spotify":
+            return audio_processor.download_spotify_audio(url, work_dir, progress_cb=progress)
+        return audio_processor.download_youtube_audio(url, work_dir, progress_cb=progress)
+
+    meta = {}
+    if kind == "spotify":
+        progress(8, "Looking up the Spotify track...")
+        meta = audio_processor.resolve_spotify_track_info(url)
+        payload = {"kind": "song", "title": meta["title"], "artist": meta.get("artist", ""),
+                   "duration": meta.get("duration", 0)}
+    else:
+        payload = {"kind": "url", "url": url}
+    progress(10, "Downloading on your computer (Lyra helper)...")
+    try:
+        got = helper_bridge.BRIDGE.request(payload, work_dir, progress)
+    except helper_bridge.HelperError as e:
+        raise RuntimeError(str(e))
+    m = got["meta"]
+    title = (f"{meta.get('artist')} - {meta['title']}" if meta.get("artist") else meta.get("title")) or m.get("title") or "Song"
+    progress(25, f"Got '{title[:35]}' from your computer")
+    return {"audio_path": got["path"], "title": title,
+            "thumbnail": meta.get("thumbnail") or m.get("thumbnail") or "",
+            "duration": meta.get("duration") or m.get("duration") or 0,
+            "uploader": meta.get("artist") or m.get("uploader") or ""}
+
+
 def ingest(source_type: str, file_path: Optional[str], url: Optional[str], work_dir: str,
            name: str, progress: Callable) -> dict:
     """Bring any source to a 44.1 kHz stereo WAV. Returns {"audio_path", meta...}."""
     os.makedirs(work_dir, exist_ok=True)
     if source_type == "spotify" or (url and ("spotify.com" in url or url.startswith("spotify:"))):
-        res = audio_processor.download_spotify_audio(url, work_dir, progress_cb=progress)
+        res = download_link("spotify", url, work_dir, progress)
     elif source_type == "youtube":
-        res = audio_processor.download_youtube_audio(url, work_dir, progress_cb=progress)
+        res = download_link("youtube", url, work_dir, progress)
     else:
         out = os.path.join(work_dir, f"{name}.wav")
         try:

@@ -127,79 +127,10 @@ def unload_demucs_model():
         logger.info("Demucs model unloaded and GPU/MPS cache cleared.")
 
 
-def _score_audio_candidate(
-    cand_title: str,
-    cand_uploader: str,
-    cand_duration: float,
-    target_title: str,
-    target_artist: str,
-    target_duration: float
-) -> float:
-    """
-    Scores an audio stream candidate against target metadata.
-    Rejects slowed/reverb edits, fan covers, instrumental/karaoke, and duration mismatches.
-    """
-    t_clean = (target_title or "").lower().strip()
-    a_clean = (target_artist or "").lower().strip()
-    cand_text = f"{cand_title or ''} {cand_uploader or ''}".lower()
+import song_source
 
-    # Penalize unwanted edits, covers, slowed/reverb, ringtones
-    penalties = [
-        "slowed", "reverb", "sped up", "speed up", "nightcore", "lofi", "lo-fi",
-        "8d", "8-d", "remix", "cover", "status", "whatsapp", "ringtone", "teaser",
-        "trailer", "reaction", "mashup", "karaoke", "instrumental", "clean vocal",
-        "acapella", "isolated vocals", "bass boosted", "slow reverb", "slow+reverb",
-        "pitched", "edit audio", "slow version", "reverb version"
-    ]
-    for p in penalties:
-        if p in cand_text and p not in t_clean:
-            return -999.0
-
-    score = 0.0
-
-    # Duration matching (huge signal for studio track vs teaser/podcast/slowed)
-    if target_duration > 0 and cand_duration > 0:
-        diff = abs(cand_duration - target_duration)
-        if cand_duration < 45 and target_duration > 70:
-            return -999.0
-        if diff <= 4:
-            score += 50.0
-        elif diff <= 10:
-            score += 35.0
-        elif diff <= 20:
-            score += 20.0
-        elif diff <= 35:
-            score += 5.0
-        elif diff > 60:
-            score -= 60.0
-        if diff > 100:
-            return -999.0
-
-    # Target title word match
-    t_words = [w for w in re.split(r'\W+', t_clean) if len(w) > 2]
-    matched_words = [w for w in t_words if w in cand_text]
-    if t_words:
-        ratio = len(matched_words) / len(t_words)
-        score += ratio * 40.0
-        if ratio < 0.5:
-            score -= 30.0
-
-    # Exact title phrase match
-    if t_clean and t_clean in cand_text:
-        score += 25.0
-
-    # Artist word match
-    a_words = [w for w in re.split(r'\W+', a_clean) if len(w) > 2]
-    matched_a = [w for w in a_words if w in cand_text]
-    if a_words:
-        score += (len(matched_a) / len(a_words)) * 30.0
-
-    # Official track indicators
-    for boost in ["official audio", "original audio", "full song", "official music video", "official video", "original motion picture"]:
-        if boost in cand_text:
-            score += 15.0
-
-    return score
+# Shared with the Lyra download helper (backend/helper), so both pick the same recording
+_score_audio_candidate = song_source.score_candidate
 
 
 def resolve_spotify_track_info(url: str) -> dict:
@@ -407,6 +338,11 @@ def _get_yt_dlp_opts(out_template: Optional[str] = None) -> dict:
     return opts
 
 
+BOT_BLOCK_MESSAGE = ("YouTube blocked this server's download (it treats cloud servers like Colab as bots). "
+                     "Start the Lyra download helper on your computer so links download through it, "
+                     "or upload the song file.")
+
+
 def download_spotify_audio(url: str, output_dir: str, progress_cb=None) -> dict:
     """
     Downloads high-fidelity audio from a Spotify Track URL by resolving
@@ -429,89 +365,19 @@ def download_spotify_audio(url: str, output_dir: str, progress_cb=None) -> dict:
     if progress_cb:
         progress_cb(12, f"Matched '{display_title[:38]}'...")
 
-    primary_artist = artist.split(",")[0].strip() if artist else ""
-    search_queries = [
-        f"{primary_artist} {title}".strip(),
-        f"{artist} {title}".strip(),
-        f"{title}".strip(),
-    ]
-    search_queries = list(dict.fromkeys([q for q in search_queries if q]))
-
     os.makedirs(output_dir, exist_ok=True)
     out_template = os.path.join(output_dir, "input_audio.%(ext)s")
-    dl_opts = _get_yt_dlp_opts(out_template)
-
     if progress_cb:
         progress_cb(18, "Searching highest-fidelity audio streams...")
-
-    candidates = []
-
-    # 1. Gather YouTube candidates
-    search_opts = {**_get_yt_dlp_opts(), 'extract_flat': True}
-    with yt_dlp.YoutubeDL(search_opts) as ydl:
-        for q in search_queries[:2]:
-            try:
-                res = ydl.extract_info(f"ytsearch8:{q}", download=False)
-                if res and "entries" in res:
-                    for entry in res["entries"]:
-                        if not entry or not entry.get("id"):
-                            continue
-                        c_title = entry.get("title") or ""
-                        c_dur = entry.get("duration") or 0
-                        c_uploader = entry.get("uploader") or ""
-                        score = _score_audio_candidate(c_title, c_uploader, c_dur, title, artist, duration)
-                        if score > 0:
-                            candidates.append((score, f"https://www.youtube.com/watch?v={entry['id']}", c_title, c_dur, "YouTube"))
-            except Exception as e:
-                logger.warning(f"YouTube search error for query '{q}': {e}")
-
-    # 2. Gather SoundCloud candidates
-    for q in search_queries[:2]:
-        try:
-            with yt_dlp.YoutubeDL({'extract_flat': True, 'quiet': True}) as sc_ydl:
-                sc_res = sc_ydl.extract_info(f"scsearch8:{q}", download=False)
-                if sc_res and sc_res.get("entries"):
-                    for entry in sc_res["entries"]:
-                        if not entry or not entry.get("url"):
-                            continue
-                        c_title = entry.get("title") or ""
-                        c_dur = entry.get("duration") or 0
-                        c_uploader = entry.get("uploader") or ""
-                        score = _score_audio_candidate(c_title, c_uploader, c_dur, title, artist, duration)
-                        if score > 0:
-                            candidates.append((score, entry["url"], c_title, c_dur, "SoundCloud"))
-        except Exception as e:
-            logger.warning(f"SoundCloud search error for query '{q}': {e}")
-
-    seen_urls = set()
-    unique_candidates = []
-    for cand in candidates:
-        if cand[1] not in seen_urls:
-            seen_urls.add(cand[1])
-            unique_candidates.append(cand)
-
-    unique_candidates.sort(key=lambda x: -x[0])
-
-    downloaded = False
-    last_err = None
-
-    for score, cand_url, cand_title, cand_dur, source in unique_candidates:
-        logger.info(f"Trying candidate [{source}] (score {score:.1f}): '{cand_title}' ({cand_dur}s)")
-        try:
-            with yt_dlp.YoutubeDL(dl_opts) as dl_ydl:
-                info = dl_ydl.extract_info(cand_url, download=True)
-                if not duration:
-                    duration = info.get("duration", 0)
-                downloaded = True
-                logger.info(f"Successfully downloaded stream for '{display_title}' via {source}: '{cand_title}'")
-                break
-        except Exception as e:
-            logger.warning(f"Candidate {cand_url} failed ({e}), trying next candidate...")
-            last_err = e
-            continue
-
-    if not downloaded:
-        raise RuntimeError(f"Could not download audio stream for Spotify track '{display_title}': {last_err}")
+    try:
+        info = song_source.download_song(title, artist, duration, _get_yt_dlp_opts(), _get_yt_dlp_opts(out_template))
+    except RuntimeError as e:
+        if getattr(e, "bot_blocked", False):
+            raise RuntimeError(f"Could not get '{display_title}': {BOT_BLOCK_MESSAGE}")
+        raise
+    if not duration:
+        duration = info.get("duration", 0)
+    logger.info(f"Downloaded '{display_title}' via {info['source']}: '{info.get('matched_title')}'")
 
     wav_path = os.path.join(output_dir, "input_audio.wav")
     if not os.path.exists(wav_path):
@@ -629,8 +495,8 @@ def download_youtube_audio(url: str, output_dir: str, progress_cb=None) -> dict:
 
     if not downloaded:
         err_msg = str(last_err)
-        if "Sign in to confirm" in err_msg or "bot" in err_msg.lower():
-            raise RuntimeError("YouTube bot check triggered on server. Please upload the audio file directly, or use a Spotify link.")
+        if song_source.is_bot_block(err_msg):
+            raise RuntimeError(BOT_BLOCK_MESSAGE)
         raise RuntimeError(f"Failed to download YouTube audio: {err_msg}")
         
     wav_path = os.path.join(output_dir, "input_audio.wav")

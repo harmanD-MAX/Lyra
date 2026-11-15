@@ -189,7 +189,7 @@ const Waveform = React.memo(function Waveform({ peaks, perSecond, from, to, widt
   return <canvas ref={ref} style={{ width: Math.min(width, 8000), height }} className="pointer-events-none block" />;
 });
 
-export default function ReelStudio({ open, onClose, job }) {
+export default function ReelStudio({ open, onClose, job, onOpenHelper, helperOnline }) {
   const jobId = job?.id;
   const results = job?.results || {};
   const songTitle = results.title || job?.metadata?.title || 'My song';
@@ -976,6 +976,13 @@ export default function ReelStudio({ open, onClose, job }) {
                   <button type="submit" className="btn btn-primary btn-sm !h-auto" disabled={!linkInput.trim()}>Import</button>
                 </div>
                 <p className="text-[11px] text-white/40">Public posts work best. YouTube Shorts and TikTok links work too.</p>
+                {helperOnline ? (
+                  <p className="text-[11px] text-emerald-300">Links download through your computer (Lyra helper connected).</p>
+                ) : onOpenHelper && (
+                  <button type="button" onClick={onOpenHelper} className="text-[11px] text-white/45 hover:text-white underline underline-offset-2">
+                    Instagram blocking downloads? Download through your computer
+                  </button>
+                )}
               </form>
 
               <div className="flex items-center gap-3 text-[11px] text-white/30"><div className="h-px flex-1 bg-white/10" />or<div className="h-px flex-1 bg-white/10" /></div>

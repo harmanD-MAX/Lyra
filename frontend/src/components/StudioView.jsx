@@ -13,6 +13,7 @@ import {
 import ProcessingStatus from './ProcessingStatus';
 import ComposerTools from './ComposerTools';
 import ReelStudio from './ReelStudio';
+import DownloadHelper, { useHelperStatus } from './DownloadHelper';
 import VoiceRing from './VoiceRing';
 import { decodeTrack, createAnalyser } from './audio/spectrum';
 
@@ -191,6 +192,8 @@ export default function StudioView({
 }) {
   const [showComposerTools, setShowComposerTools] = useState(false);
   const [showReelStudio, setShowReelStudio] = useState(false);
+  const [showHelper, setShowHelper] = useState(false);
+  const helperStatus = useHelperStatus(true, 15000);
   // Optional reference mastering: master to sound like a finished song the user picks
   const [referenceSong, setReferenceSong] = useState(null);
   const [clearReference, setClearReference] = useState(false);
@@ -1824,6 +1827,11 @@ export default function StudioView({
                     <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
                     <span className="break-words leading-relaxed">{errorMsg}</span>
                   </div>
+                  {/(blocked|bot|helper|sign in to confirm)/i.test(errorMsg) && !helperStatus?.online && (
+                    <button type="button" onClick={() => setShowHelper(true)} className="btn btn-outline-gold btn-sm shrink-0">
+                      Use my computer
+                    </button>
+                  )}
                   {setErrorMsg && (
                     <button
                       type="button"
@@ -2064,6 +2072,21 @@ export default function StudioView({
                                 </button>
                               )}
                             </div>
+
+                            {helperStatus?.online ? (
+                              <span className="self-start chip chip-green" title="The Lyra download helper on your computer downloads these links">
+                                <CheckCircle2 className="w-3 h-3" /> Downloads through your computer ({helperStatus.helper?.name || 'helper'})
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setShowHelper(true)}
+                                className="self-start text-[11px] text-white/40 hover:text-white underline underline-offset-2 cursor-pointer"
+                                title="YouTube blocks downloads from cloud servers; the helper downloads on your computer instead"
+                              >
+                                YouTube blocking downloads? Download through your computer
+                              </button>
+                            )}
 
                             {ingestMethod === 'spotify' && isFetchingSpotify && (
                               <div className="text-[11px] text-white/55 flex items-center gap-2 font-mono">
@@ -2330,10 +2353,14 @@ export default function StudioView({
         </div>
       )}
 
+      <DownloadHelper open={showHelper} onClose={() => setShowHelper(false)} />
+
       <ReelStudio
         open={showReelStudio}
         onClose={() => setShowReelStudio(false)}
         job={currentJob}
+        onOpenHelper={() => setShowHelper(true)}
+        helperOnline={!!helperStatus?.online}
       />
 
       <ComposerTools

@@ -47,6 +47,10 @@ In a notebook with GPU T4 enabled:
 
 Public posts and reels import directly. Instagram sometimes asks for a login, especially from cloud servers. Then either upload the video file instead, or export your Instagram cookies to a `cookies.txt` file (with a browser extension like "Get cookies.txt") and set `INSTAGRAM_COOKIES_PATH=/path/to/cookies.txt` in `backend/.env`.
 
+### Download helper (YouTube / Spotify / Instagram links on Colab)
+
+YouTube and Instagram block downloads from cloud servers like Colab, but not from home internet. In Lyra, click **"Download through your computer"** (under the link box), download the helper, unzip it and start `start-helper.bat` (Windows) or `start-helper.command` (Mac). While its window is open, links you paste into Lyra download on your computer and are sent to your Lyra for conversion. Needs Python 3, and [Deno](https://deno.com) for YouTube.
+
 ## Architecture
 
 ![System overview](docs/architecture/system-overview.png)

@@ -157,6 +157,21 @@ def _ydl_opts(out_template: str) -> dict:
 
 def download_video(url: str, rdir: str) -> dict:
     """Download a post / reel (Instagram, YouTube Shorts, TikTok, ... anything yt-dlp reads)."""
+    import helper_bridge
+    if helper_bridge.BRIDGE.is_online():
+        # Instagram and YouTube block cloud servers; the helper downloads on the user's computer
+        update_meta(rdir, message="Downloading on your computer (Lyra helper)...")
+        try:
+            got = helper_bridge.BRIDGE.request(
+                {"kind": "video", "url": url}, rdir,
+                lambda pct, msg: update_meta(rdir, message=msg))
+        except helper_bridge.HelperError as e:
+            raise RuntimeError(str(e))
+        ext = os.path.splitext(got["path"])[1] or ".mp4"
+        dest = os.path.join(rdir, "download" + ext)
+        os.replace(got["path"], dest)
+        m = got["meta"]
+        return {"path": dest, "title": m.get("title") or "", "uploader": m.get("uploader") or "", "source_url": url}
     import yt_dlp
     out_template = os.path.join(rdir, "download.%(ext)s")
     try:
@@ -167,8 +182,8 @@ def download_video(url: str, rdir: str) -> dict:
         low = msg.lower()
         if "instagram" in url.lower() and "proxy" not in low and any(
                 k in low for k in ("login", "cookie", "rate-limit", "rate limit", "private", "401")):
-            raise RuntimeError("Instagram wants a login for this post. Download the video on your phone and upload "
-                               "it here instead, or set INSTAGRAM_COOKIES_PATH on the server to a cookies.txt file.")
+            raise RuntimeError("Instagram blocked this server's download. Start the Lyra download helper on your "
+                               "computer (links then download there), or upload the video file instead.")
         raise RuntimeError(f"Could not download this video: {msg[-300:]}")
     if info and info.get("entries"):
         info = next((e for e in info["entries"] if e), info)  # carousel: first video
