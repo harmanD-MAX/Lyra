@@ -7,8 +7,12 @@ sends the song to your Lyra, which then converts it as usual.
 
 START IT
   Windows: double-click  start-helper.bat
-  Mac:     right-click   start-helper.command  ->  Open  (only the first time;
-           after that a double-click works)
+  Mac:     open Terminal, type  bash  and a space, drag start-helper.command
+           into the Terminal window, press Enter.
+           (Double-clicking shows "Apple could not verify..." because the file
+           is not from the App Store. Either use Terminal as above, or click
+           Done, go to System Settings > Privacy & Security, click
+           "Open Anyway", then double-click it again.)
   Linux:   run           ./start-helper.sh
 
   The first start installs what it needs (about a minute). You need Python 3:

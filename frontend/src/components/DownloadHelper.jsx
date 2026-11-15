@@ -88,7 +88,12 @@ export default function DownloadHelper({ open, onClose }) {
             Unzip it and start it:
             <div className="text-[12px] text-white/60 mt-1 space-y-0.5">
               <div><b>Windows:</b> double-click <code className="text-[#3fe0c5]">start-helper.bat</code></div>
-              <div><b>Mac:</b> right-click <code className="text-[#3fe0c5]">start-helper.command</code> → Open (first time only)</div>
+              <div>
+                <b>Mac:</b> open <b>Terminal</b>, type <code className="text-[#3fe0c5]">bash </code> (with a space), drag{' '}
+                <code className="text-[#3fe0c5]">start-helper.command</code> into the Terminal window and press Enter.
+                <div className="text-white/40">Double-clicking it shows "Apple could not verify..." because it isn't from the App Store;
+                  Terminal avoids that, or allow it once in System Settings → Privacy &amp; Security → Open Anyway.</div>
+              </div>
             </div>
           </Step>
           <Step n={4}>Keep its window open while you use Lyra. The status above turns green.</Step>

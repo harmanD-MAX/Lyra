@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Lyra download helper for Mac and Linux. On a Mac, right-click this file and choose Open the first time.
+# Lyra download helper for Mac and Linux.
+# Mac: run it from Terminal with  bash start-helper.command  (drag the file into Terminal after "bash "),
+# or allow it once in System Settings > Privacy & Security > Open Anyway, then double-click.
 cd "$(dirname "$0")" || exit 1
 echo "Starting the Lyra download helper..."
 

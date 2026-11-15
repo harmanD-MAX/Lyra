@@ -49,7 +49,7 @@ Public posts and reels import directly. Instagram sometimes asks for a login, es
 
 ### Download helper (YouTube / Spotify / Instagram links on Colab)
 
-YouTube and Instagram block downloads from cloud servers like Colab, but not from home internet. In Lyra, click **"Download through your computer"** (under the link box), download the helper, unzip it and start `start-helper.bat` (Windows) or `start-helper.command` (Mac). While its window is open, links you paste into Lyra download on your computer and are sent to your Lyra for conversion. Needs Python 3, and [Deno](https://deno.com) for YouTube.
+YouTube and Instagram block downloads from cloud servers like Colab, but not from home internet. In Lyra, click **"Download through your computer"** (under the link box), download the helper, unzip it and start `start-helper.bat` (Windows), or on a Mac run `bash start-helper.command` in Terminal (macOS blocks double-clicking downloaded scripts; System Settings → Privacy & Security → Open Anyway also works). While its window is open, links you paste into Lyra download on your computer and are sent to your Lyra for conversion. Needs Python 3, and [Deno](https://deno.com) for YouTube.
 
 ## Architecture
 
