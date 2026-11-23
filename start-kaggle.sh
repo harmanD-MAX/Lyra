@@ -17,28 +17,34 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
 fi
 pip install -r backend/requirements.txt --quiet
 
-# setup tunnel client
-TUNNEL="${LYRA_TUNNEL:-loca}"
+# setup tunnel client (defaults to cloudflare for instant, password-free access)
+TUNNEL="${LYRA_TUNNEL:-cloudflare}"
 SUBDOMAIN="${LYRA_SUBDOMAIN:-lyra-studio}"
 CLOUDFLARED="$ROOT_DIR/.bin/cloudflared"
-if [ "$TUNNEL" = "cloudflare" ]; then
-  if [ ! -x "$CLOUDFLARED" ]; then
+
+if [ "$TUNNEL" = "cloudflare" ] || [ "$TUNNEL" = "auto" ]; then
+  if ! command -v cloudflared >/dev/null 2>&1 && [ ! -x "$CLOUDFLARED" ]; then
+    echo "📥 Downloading Cloudflare Tunnel (cloudflared)..."
     mkdir -p "$ROOT_DIR/.bin"
-    curl -fsSL -o "$CLOUDFLARED" \
+    curl -fsSL --retry 3 -o "$CLOUDFLARED" \
       https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
     chmod +x "$CLOUDFLARED"
   fi
-elif ! command -v lt >/dev/null 2>&1; then
-  if ! command -v npm >/dev/null 2>&1; then
-    apt-get -qq update && apt-get -qq install -y nodejs npm >/dev/null
+  if command -v cloudflared >/dev/null 2>&1; then
+    CLOUDFLARED="$(command -v cloudflared)"
   fi
-  npm install -g localtunnel >/dev/null 2>&1
-fi
-
-# fix localtunnel audio upload corruption
-LT_FIX_TARGET="$(npm root -g 2>/dev/null || true)/localtunnel/lib/HeaderHostTransformer.js"
-if [ -f "$LT_FIX_TARGET" ]; then
-  cp "$ROOT_DIR/tools/localtunnel-host-fix.js" "$LT_FIX_TARGET"
+elif [ "$TUNNEL" = "loca" ]; then
+  if ! command -v lt >/dev/null 2>&1; then
+    if ! command -v npm >/dev/null 2>&1; then
+      apt-get -qq update && apt-get -qq install -y nodejs npm >/dev/null
+    fi
+    npm install -g localtunnel >/dev/null 2>&1
+  fi
+  # fix localtunnel audio upload corruption
+  LT_FIX_TARGET="$(npm root -g 2>/dev/null || true)/localtunnel/lib/HeaderHostTransformer.js"
+  if [ -f "$LT_FIX_TARGET" ]; then
+    cp "$ROOT_DIR/tools/localtunnel-host-fix.js" "$LT_FIX_TARGET"
+  fi
 fi
 
 # persistent storage directory
@@ -86,44 +92,81 @@ echo "✅ Lyra backend is online."
 # start tunnel
 start_tunnel() {
   URL=""
-  if [ "$TUNNEL" = "cloudflare" ]; then
-    "$CLOUDFLARED" tunnel --no-autoupdate --url http://127.0.0.1:8000 >> /tmp/cloudflared.log 2>&1 &
+  if [ "$TUNNEL" = "cloudflare" ] || [ "$TUNNEL" = "auto" ]; then
+    echo "🌐 Starting Cloudflare tunnel..."
+    rm -f /tmp/cloudflared.log
+    "$CLOUDFLARED" tunnel --no-autoupdate --url http://127.0.0.1:8000 > /tmp/cloudflared.log 2>&1 &
     TUNNEL_PID=$!
-    for i in {1..30}; do
-      URL=$(grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" /tmp/cloudflared.log | tail -n 1 || true)
-      [ -n "$URL" ] && break
+    for i in {1..35}; do
+      if [ -f /tmp/cloudflared.log ]; then
+        URL=$(grep -oE "https://[a-zA-Z0-9-]+\.trycloudflare\.com" /tmp/cloudflared.log 2>/dev/null | head -n 1 || true)
+        [ -n "$URL" ] && break
+      fi
       sleep 1
     done
-  else
-    : > /tmp/lt.log
-    lt --port 8000 --local-host 127.0.0.1 --subdomain "$SUBDOMAIN" >> /tmp/lt.log 2>&1 &
-    TUNNEL_PID=$!
-    for i in {1..20}; do
-      URL=$(grep -oE "https://[a-z0-9-]+\.loca\.lt" /tmp/lt.log | tail -n 1 || true)
-      [ -n "$URL" ] && break
-      sleep 1
-    done
-  fi
-  echo ""
-  echo "============================================================"
-  echo " 🚀 LYRA STUDIO IS LIVE"
-  echo " 👉 OPEN: ${URL:-(tunnel still starting, see /tmp/lt.log or /tmp/cloudflared.log)}"
-  if [ "$TUNNEL" != "cloudflare" ]; then
-    echo " 🔑 Tunnel password if asked: $(curl -s https://loca.lt/mytunnelpassword 2>/dev/null)"
-    if [ -n "$URL" ] && [ "$URL" != "https://$SUBDOMAIN.loca.lt" ]; then
-      echo " ℹ️  $SUBDOMAIN.loca.lt is still held by an old session; it frees up in a few"
-      echo "    minutes. Stop this cell and run it again to get the fixed address back."
+    if [ -z "$URL" ]; then
+      echo "⚠️ Cloudflare tunnel URL took longer than expected. Checking log:"
+      tail -n 15 /tmp/cloudflared.log 2>/dev/null || true
     fi
   fi
-  echo "============================================================"
-  echo " Server log: tail -n 30 /tmp/uvicorn.log"
-  echo ""
+
+  # Fallback to localtunnel if requested or if cloudflare was not configured
+  if [ -z "$URL" ] && [ "$TUNNEL" = "loca" ]; then
+    echo "🌐 Starting Localtunnel..."
+    rm -f /tmp/lt.log
+    lt --port 8000 --local-host 127.0.0.1 --subdomain "$SUBDOMAIN" > /tmp/lt.log 2>&1 &
+    TUNNEL_PID=$!
+    for i in {1..25}; do
+      if [ -f /tmp/lt.log ]; then
+        URL=$(grep -oE "https://[a-zA-Z0-9-]+\.loca\.lt" /tmp/lt.log 2>/dev/null | head -n 1 || true)
+        [ -n "$URL" ] && break
+      fi
+      sleep 1
+    done
+  fi
+
+  if [ -n "$URL" ]; then
+    echo ""
+    echo "============================================================"
+    echo " 🚀 LYRA STUDIO IS LIVE"
+    echo " 👉 OPEN: $URL"
+    if [ "$TUNNEL" = "loca" ]; then
+      echo " 🔑 Tunnel password if asked: $(curl -s https://loca.lt/mytunnelpassword 2>/dev/null || true)"
+    fi
+    echo "============================================================"
+    echo " Server log: tail -n 30 /tmp/uvicorn.log"
+    echo ""
+  else
+    echo ""
+    echo "============================================================"
+    echo " 🚀 LYRA STUDIO IS LIVE"
+    echo " 👉 Tunnel is still acquiring URL, waiting..."
+    echo "============================================================"
+    echo ""
+  fi
 }
 start_tunnel
 
-# keep tunnel alive
+# keep tunnel alive and display URL as soon as available
 while kill -0 "$SERVER_PID" 2>/dev/null; do
-  if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+  if [ -z "$URL" ]; then
+    if [ -f /tmp/cloudflared.log ]; then
+      URL=$(grep -oE "https://[a-zA-Z0-9-]+\.trycloudflare\.com" /tmp/cloudflared.log 2>/dev/null | head -n 1 || true)
+    fi
+    if [ -z "$URL" ] && [ -f /tmp/lt.log ]; then
+      URL=$(grep -oE "https://[a-zA-Z0-9-]+\.loca\.lt" /tmp/lt.log 2>/dev/null | head -n 1 || true)
+    fi
+    if [ -n "$URL" ]; then
+      echo ""
+      echo "============================================================"
+      echo " 🚀 LYRA STUDIO IS LIVE"
+      echo " 👉 OPEN: $URL"
+      echo "============================================================"
+      echo ""
+    fi
+  fi
+
+  if [ -n "${TUNNEL_PID:-}" ] && ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
     echo "⚠️ Tunnel disconnected. Reconnecting..."
     start_tunnel
   fi
