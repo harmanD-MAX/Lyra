@@ -17,12 +17,12 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
 fi
 pip install -r backend/requirements.txt --quiet
 
-# setup tunnel client (cloudflare quick tunnel by default, or loca for fixed subdomain)
-TUNNEL="${LYRA_TUNNEL:-cloudflare}"
+# setup tunnel client (defaults to loca for fixed permanent https://lyra-studio.loca.lt URL)
+TUNNEL="${LYRA_TUNNEL:-loca}"
 SUBDOMAIN="${LYRA_SUBDOMAIN:-lyra-studio}"
 CLOUDFLARED="$ROOT_DIR/.bin/cloudflared"
 
-if [ "$TUNNEL" = "cloudflare" ] || [ "$TUNNEL" = "auto" ] || [ -n "${CF_TUNNEL_TOKEN:-}" ]; then
+if [ "$TUNNEL" = "cloudflare" ] || [ -n "${CF_TUNNEL_TOKEN:-}" ]; then
   if ! command -v cloudflared >/dev/null 2>&1 && [ ! -x "$CLOUDFLARED" ]; then
     echo "📥 Downloading Cloudflare Tunnel (cloudflared)..."
     mkdir -p "$ROOT_DIR/.bin"
@@ -93,14 +93,15 @@ echo "✅ Lyra backend is online."
 # start tunnel
 start_tunnel() {
   URL=""
+
   if [ -n "${CF_TUNNEL_TOKEN:-}" ]; then
     echo "🌐 Starting Cloudflare with permanent custom domain token..."
     rm -f /tmp/cloudflared.log
     "$CLOUDFLARED" tunnel --no-autoupdate run --token "$CF_TUNNEL_TOKEN" > /tmp/cloudflared.log 2>&1 &
     TUNNEL_PID=$!
     URL="${CF_FIXED_DOMAIN:-https://${SUBDOMAIN}.yourdomain.com}"
-  elif [ "$TUNNEL" = "cloudflare" ] || [ "$TUNNEL" = "auto" ]; then
-    echo "🌐 Starting Cloudflare tunnel..."
+  elif [ "$TUNNEL" = "cloudflare" ]; then
+    echo "🌐 Starting Cloudflare quick tunnel..."
     rm -f /tmp/cloudflared.log
     "$CLOUDFLARED" tunnel --no-autoupdate --url http://127.0.0.1:8000 > /tmp/cloudflared.log 2>&1 &
     TUNNEL_PID=$!
@@ -111,40 +112,46 @@ start_tunnel() {
       fi
       sleep 1
     done
-    if [ -z "$URL" ]; then
-      echo "⚠️ Cloudflare quick tunnel took longer than expected. Checking log:"
-      tail -n 15 /tmp/cloudflared.log 2>/dev/null || true
-    fi
   fi
 
-  # Fallback to localtunnel if requested or if cloudflare was not configured
-  if [ -z "$URL" ] && [ "$TUNNEL" = "loca" ]; then
-    echo "🌐 Starting Localtunnel with fixed subdomain '$SUBDOMAIN'..."
-    rm -f /tmp/lt.log
-    lt --port 8000 --local-host 127.0.0.1 --subdomain "$SUBDOMAIN" > /tmp/lt.log 2>&1 &
-    TUNNEL_PID=$!
-    for i in {1..25}; do
-      if [ -f /tmp/lt.log ]; then
-        URL=$(grep -oE "https://[a-zA-Z0-9-]+\.loca\.lt" /tmp/lt.log 2>/dev/null | head -n 1 || true)
-        [ -n "$URL" ] && break
+  # Default: Localtunnel with fixed subdomain 'lyra-studio' and retry to claim
+  if [ "$TUNNEL" = "loca" ] || [ -z "$URL" ]; then
+    echo "🌐 Starting Localtunnel claiming fixed address: https://${SUBDOMAIN}.loca.lt ..."
+    for attempt in {1..4}; do
+      rm -f /tmp/lt.log
+      lt --port 8000 --local-host 127.0.0.1 --subdomain "$SUBDOMAIN" > /tmp/lt.log 2>&1 &
+      TUNNEL_PID=$!
+      for i in {1..15}; do
+        if [ -f /tmp/lt.log ]; then
+          URL=$(grep -oE "https://[a-zA-Z0-9-]+\.loca\.lt" /tmp/lt.log 2>/dev/null | head -n 1 || true)
+          [ -n "$URL" ] && break
+        fi
+        sleep 1
+      done
+      if [ "$URL" = "https://${SUBDOMAIN}.loca.lt" ]; then
+        break
       fi
-      sleep 1
+      if [ $attempt -lt 4 ]; then
+        echo "⏳ Subdomain '$SUBDOMAIN' is releasing from previous session, retrying to claim ($attempt/3)..."
+        kill "$TUNNEL_PID" 2>/dev/null || true
+        sleep 3
+      fi
     done
   fi
 
   if [ -n "$URL" ]; then
+    TUNNEL_PASS=$(curl -s https://loca.lt/mytunnelpassword 2>/dev/null || curl -s https://ipv4.icanhazip.com 2>/dev/null || echo "")
     echo ""
     echo "============================================================"
     echo " 🚀 LYRA STUDIO IS LIVE"
     echo " 👉 OPEN: $URL"
-    if [ "$TUNNEL" = "loca" ]; then
-      echo " 🔑 Tunnel password if asked: $(curl -s https://loca.lt/mytunnelpassword 2>/dev/null || true)"
-      echo " 📌 URL is fixed to: https://$SUBDOMAIN.loca.lt"
-    else
-      echo " ⚠️  IMPORTANT: Keep this cell running! Stopping it (^C) shuts down the tunnel (Error 1033)."
-      echo " 📌 Quick Cloudflare URLs change on each restart. For a fixed URL, run with LYRA_TUNNEL=loca"
-      echo "    or provide your permanent CF_TUNNEL_TOKEN."
+    if [[ "$URL" == *"loca.lt"* ]]; then
+      if [ -n "$TUNNEL_PASS" ]; then
+        echo " 🔑 Password (if asked on first visit): $TUNNEL_PASS"
+      fi
+      echo " 📌 Fixed address: https://$SUBDOMAIN.loca.lt"
     fi
+    echo " ⚠️  IMPORTANT: Keep this cell running! Stopping it (^C) closes the tunnel."
     echo "============================================================"
     echo " Server log: tail -n 30 /tmp/uvicorn.log"
     echo ""
@@ -162,18 +169,18 @@ start_tunnel
 # keep tunnel alive and display URL as soon as available
 while kill -0 "$SERVER_PID" 2>/dev/null; do
   if [ -z "$URL" ]; then
-    if [ -f /tmp/cloudflared.log ]; then
-      URL=$(grep -oE "https://[a-zA-Z0-9-]+\.trycloudflare\.com" /tmp/cloudflared.log 2>/dev/null | head -n 1 || true)
-    fi
-    if [ -z "$URL" ] && [ -f /tmp/lt.log ]; then
+    if [ -f /tmp/lt.log ]; then
       URL=$(grep -oE "https://[a-zA-Z0-9-]+\.loca\.lt" /tmp/lt.log 2>/dev/null | head -n 1 || true)
+    fi
+    if [ -z "$URL" ] && [ -f /tmp/cloudflared.log ]; then
+      URL=$(grep -oE "https://[a-zA-Z0-9-]+\.trycloudflare\.com" /tmp/cloudflared.log 2>/dev/null | head -n 1 || true)
     fi
     if [ -n "$URL" ]; then
       echo ""
       echo "============================================================"
       echo " 🚀 LYRA STUDIO IS LIVE"
       echo " 👉 OPEN: $URL"
-      echo " ⚠️  Keep this cell running! Stopping (^C) closes the tunnel (Error 1033)."
+      echo " ⚠️  Keep this cell running! Stopping (^C) closes the tunnel."
       echo "============================================================"
       echo ""
     fi
